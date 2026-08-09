@@ -1,7 +1,24 @@
 # Biomechanics-Aware Pedicle Screw Planning
-[![Tests](https://github.com/xinrongli-figskat/biomechanics-pedicle-planning/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/xinrongli-figskat/biomechanics-pedicle-planning/actions/workflows/tests.yml)
-A CT- and geometry-based computational planning research prototype for pedicle screw placement.
 
+[![Tests](https://github.com/xinrongli-figskat/biomechanics-pedicle-planning/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/xinrongli-figskat/biomechanics-pedicle-planning/actions/workflows/tests.yml)
+
+> A CT- and geometry-based computational planning research prototype for pedicle screw placement.
+
+This repository presents a portfolio-oriented extraction of the core computational
+algorithms from a larger biomedical research prototype. It focuses on CT/HU
+processing, geometric scoring, heuristic entry-point optimization, tetrahedral
+mesh transition algorithms, and Abaqus C3D4 export.
+
+![Synthetic planning demo](docs/images/synthetic_planning_demo.png)
+
+## Highlights
+
+- CT HU preprocessing and voxel/world coordinate transformation
+- Geometry- and HU-aware entry-point scoring
+- Heuristic local-search optimization
+- Tetrahedral transition and Abaqus export utilities
+- 17 synthetic tests with GitHub Actions CI
+- No real patient data or patient-derived geometry
 ## Overview
 
 This repository contains a portfolio-oriented core algorithm implementation extracted and reorganized from a larger research software project. The public package focuses on inspectable computational methods and synthetic tests rather than a complete clinical application.
