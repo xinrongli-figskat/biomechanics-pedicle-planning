@@ -1,0 +1,79 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# Medical imaging / patient data
+*.dcm
+*.dicom
+*.nii
+*.nii.gz
+*.nrrd
+*.mha
+*.mhd
+*.pkl
+*.pickle
+
+DICOMDB/
+DICOMDB.nii/
+MODELDB/
+
+# Geometry / patient-derived data
+*.stl
+*.vtk
+*.vti
+*.vtu
+*.ply
+
+# FEA outputs
+*.inp
+*.odb
+*.dat
+*.msg
+*.sta
+
+result/
+results/
+output/
+outputs/
+artifacts/
+
+# Runtime / binaries
+runtime/
+site-packages/
+*.exe
+*.dll
+*.lib
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+credentials.*
+secrets.*
+
+# Logs / temp
+*.log
+*.tmp
+*.temp
+*.bak
+*.dump
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
