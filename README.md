@@ -1,5 +1,5 @@
 # Biomechanics-Aware Pedicle Screw Planning
-
+[![Tests](https://github.com/xinrongli-figskat/biomechanics-pedicle-planning/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/xinrongli-figskat/biomechanics-pedicle-planning/actions/workflows/tests.yml)
 A CT- and geometry-based computational planning research prototype for pedicle screw placement.
 
 ## Overview
