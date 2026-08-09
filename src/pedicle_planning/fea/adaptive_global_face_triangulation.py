@@ -2,10 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-try:
-    from script.funcs.fea import adaptive_green_face_bucket_builder as fb
-except Exception:
-    import adaptive_green_face_bucket_builder as fb
+from . import adaptive_green_face_bucket_builder as fb
 
 
 @dataclass(frozen=True)

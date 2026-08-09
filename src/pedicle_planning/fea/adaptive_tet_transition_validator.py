@@ -5,13 +5,7 @@ from __future__ import annotations
 import itertools
 import math
 
-try:
-    from script.funcs.fea import adaptive_tet_transition_templates as tpl
-except Exception:
-    try:
-        from funcs.fea import adaptive_tet_transition_templates as tpl
-    except Exception:
-        import adaptive_tet_transition_templates as tpl
+from . import adaptive_tet_transition_templates as tpl
 
 
 def _sub(a, b):

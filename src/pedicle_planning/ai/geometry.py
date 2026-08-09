@@ -11,12 +11,6 @@ import pyvista as pv
 
 from .config import config
 
-try:
-    print("PyVista version:", getattr(pv, "__version__", "unknown"))
-    print("PyVista file:", getattr(pv, "__file__", "unknown"))
-except Exception as exc:
-    print("PyVista version/file unavailable:", repr(exc))
-
 
 _GEOMETRY_WARNED = set()
 

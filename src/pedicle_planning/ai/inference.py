@@ -41,7 +41,6 @@ def predict_entry_point(sitk_image, bone_mesh) -> tuple:
     RuntimeError
         如果预测过程失败
     """
-    print("STEP2")
     if bone_mesh is None:
         raise ValueError("bone_mesh cannot be None")
 

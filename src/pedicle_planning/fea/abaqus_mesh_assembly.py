@@ -8,13 +8,7 @@ from __future__ import annotations
 
 import os
 
-try:
-    from funcs.fea.abaqus_part_writer import generate_abaqus_part_files
-except Exception:
-    try:
-        from .abaqus_part_writer import generate_abaqus_part_files
-    except Exception:
-        generate_abaqus_part_files = None
+from .abaqus_part_writer import generate_abaqus_part_files
 
 
 def _normalize_path_for_inp(path):
