@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "biomechanics-pedicle-planning"
-version = "0.2.0"
+version = "0.3.0"
 description = "A CT- and geometry-based computational planning research prototype for pedicle screw placement."
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+demo = ["matplotlib"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

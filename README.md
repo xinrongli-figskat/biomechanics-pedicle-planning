@@ -46,16 +46,19 @@ The repository exposes the individual computational components above. It is not 
 
 ```text
 .
-├── docs/
-│   ├── algorithm.md
-│   ├── architecture.md
-│   └── limitations.md
-├── src/pedicle_planning/
-│   ├── ai/                 # CT, geometry, scoring, and optimization
-│   └── fea/                # Tetrahedral transitions and Abaqus export
-├── tests/                  # Fully synthetic unit tests
-├── pyproject.toml
-└── README.md
+|-- .github/workflows/      # Python 3.13 synthetic-test CI
+|-- docs/
+|   |-- algorithm.md
+|   |-- architecture.md
+|   |-- images/             # Demo-generated synthetic figures
+|   `-- limitations.md
+|-- examples/synthetic/     # In-memory planning demonstration
+|-- src/pedicle_planning/
+|   |-- ai/                 # CT, geometry, scoring, and optimization
+|   `-- fea/                # Tetrahedral transitions and Abaqus export
+|-- tests/                  # Fully synthetic unit tests
+|-- pyproject.toml
+`-- README.md
 ```
 
 ## Testing
@@ -75,6 +78,25 @@ The current test suite contains 17 synthetic tests. They cover:
 
 No real patient data is used in the test suite.
 
+## Synthetic Demo
+
+The demonstration uses fully synthetic volumes and geometry and contains no patient-derived data. It creates an abstract three-region HU volume in memory, constructs a generic PyVista sphere, generates local candidate points, and runs the existing scorer and local-search optimizer.
+
+The demo calls the scorer and optimizer directly; it does not claim to demonstrate a complete image-to-plan predictor or a clinical workflow. It reads no DICOM, NIfTI, STL, VTK data, Abaqus INP, or patient JSON files.
+
+Run it after installation:
+
+```bash
+python -m pip install -e ".[dev,demo]"
+python examples/synthetic/run_planning_demo.py
+```
+
+![Synthetic planning demonstration](docs/images/synthetic_planning_demo.png)
+
+The optimizer does not expose per-iteration history. The following plot therefore shows the running best heuristic score by score-evaluation index, recorded only by the demo wrapper without changing optimizer behavior.
+
+![Synthetic optimization progress](docs/images/optimization_progress.png)
+
 ## Installation
 
 ```bash
@@ -83,7 +105,7 @@ python -m pip install -e ".[dev]"
 python -m pytest -q
 ```
 
-The declared Python range is intentionally conservative: Portfolio V0.2 has been tested with Python 3.13.
+The declared Python range is intentionally conservative: Portfolio V0.3 has been tested with Python 3.13.
 
 ## Algorithm Characterization
 
