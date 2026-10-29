@@ -51,13 +51,34 @@ The synthetic optimizer test uses an analytic objective with a known optimum. Th
 
 `TrajectoryFeatures.to_flat_dict()` flattens the result into named scalar features for downstream risk models. Default segment fractions and thresholds are engineering defaults, not anatomically or clinically validated values. This module is additive: it does not change the existing scorer or optimizer.
 
-## 7. Tetrahedral Transition Algorithms
+## 7. Pedicle Isthmus Detection
+
+`pedicle_planning.ai.pedicle.detect_pedicle_isthmus` uses a baseline screw that passes through the pedicle (typically the surgeon's plan) and a binary vertebra mask.
+
+- **Profile.** Planes perpendicular to the screw axis are sampled every 1 mm over 5–70 % of the screw length (0.25 mm in-plane grid, ±12 mm window). On each plane the bone component containing the axis point is extracted; components touching the window border are treated as lamina/body and excluded.
+- **Isthmus.** The plane with the smallest enclosed cross-sectional area is the isthmus. The outer minimum width is the smallest caliper width of that component; when CT is supplied, the connected region below the cortical threshold (800 HU) gives the inner (cancellous-channel) width.
+- **Pedicle axis.** A line is fitted (PCA) through the centroids of the sections whose area is within 1.5× of the isthmus area. The profile is then re-sliced perpendicular to that axis so that oblique cuts do not overestimate width.
+- **Pedicle segment.** The contiguous range with area ≤ 2× the isthmus area defines start and end planes. Because these are anatomical planes, any candidate screw can be mapped onto them without re-detection (`segment_bounds_for`).
+- **Trajectory match.** For any screw: angle to the pedicle axis, offset from the isthmus centroid in the isthmus plane, outer/inner wall clearance of the screw surface at the isthmus, and diameter-to-inner-width ratio.
+
+## 8. Candidate Generation and Risk-Based Selection
+
+`pedicle_planning.ai.candidates` starts from the baseline plan and an `AnatomicalFrame` (medial and cranial directions for that screw).
+
+- **Grid.** By default: entry shifted −2…+2 mm medially in 1 mm steps, medial angulation −5/0/+5°, length −5/0/+5 mm, and diameter +0/+0.5 mm (90 candidates including the baseline). Cranial shifts and cranio-caudal angulation are available but default to no change; absolute length and diameter catalogues can be passed instead of offsets.
+- **Safety filter.** Built-in hard constraints: diameter ≤ isthmus inner width − 1 mm, non-negative pedicle-wall clearance at the isthmus, and a 2 mm in-bone margin around the tip. Constraints whose data are absent are skipped. Spinal-canal, nerve-root, endplate, and facet constraints require additional segmentation and can be added as callables.
+- **Scoring.** For each feasible candidate the trajectory features (Section 6, with anatomical segment bounds) and `match_*` features are recomputed and passed to a caller-supplied `risk_fn(features) -> float`. The lowest-risk feasible candidate is selected; ties keep the baseline.
+- **Output.** `OptimizationResult.summary()` reports baseline and best risk, absolute and relative risk reduction, entry offsets, angle changes, and the recommended length and diameter.
+
+The package contains no trained loosening-risk model; tests use a synthetic vertebra and a toy risk function.
+
+## 9. Tetrahedral Transition Algorithms
 
 The FEA package contains transition templates for tetrahedral refinement and utilities that validate generated tetrahedra. Validation checks include element volume and orientation, duplicate elements, non-manifold faces, interface signatures, and elementary mesh-quality measures.
 
 Additional helpers group green-transition faces and triangulate shared interfaces consistently. The templates represent computational mesh preprocessing; they are not a complete adaptive meshing system or a claim of solver accuracy.
 
-## 8. Abaqus Export
+## 10. Abaqus Export
 
 The export layer writes nodes and four-node tetrahedral elements as Abaqus C3D4 part definitions and assembles generated parts into an Abaqus input structure. It can parse the relevant mesh text used by the writer and reports basic counts and status.
 

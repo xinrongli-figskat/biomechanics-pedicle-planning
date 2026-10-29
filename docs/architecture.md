@@ -27,6 +27,10 @@ pedicle_planning.ai
 │       └── config
 ├── utils
 │   └── config
+├── candidates (candidate generation, safety constraints, risk minimization)
+│   └── trajectory
+├── pedicle (pedicle isthmus detection and trajectory match)
+│   └── trajectory
 ├── trajectory (screw-trajectory sampling and bone-density features; NumPy/SimpleITK, PyVista only for mesh membership)
 └── __init__ (lazy public exports)
 ```

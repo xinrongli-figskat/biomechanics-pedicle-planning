@@ -18,6 +18,10 @@ __all__ = [
     "LinearCalibration",
     "TrajectorySamplingConfig",
     "compute_trajectory_features",
+    "detect_pedicle_isthmus",
+    "AnatomicalFrame",
+    "generate_candidates",
+    "optimize_screw_plan",
 ]
 
 _EXPORT_MODULES = {
@@ -31,6 +35,10 @@ _EXPORT_MODULES = {
     "LinearCalibration": ".trajectory",
     "TrajectorySamplingConfig": ".trajectory",
     "compute_trajectory_features": ".trajectory",
+    "detect_pedicle_isthmus": ".pedicle",
+    "AnatomicalFrame": ".candidates",
+    "generate_candidates": ".candidates",
+    "optimize_screw_plan": ".candidates",
 }
 
 
