@@ -27,6 +27,7 @@ pedicle_planning.ai
 │       └── config
 ├── utils
 │   └── config
+├── trajectory (screw-trajectory sampling and bone-density features; NumPy/SimpleITK, PyVista only for mesh membership)
 └── __init__ (lazy public exports)
 ```
 

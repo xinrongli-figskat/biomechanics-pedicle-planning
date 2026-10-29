@@ -38,13 +38,26 @@ The optimizer refines a candidate through bounded local search and supports grad
 
 The synthetic optimizer test uses an analytic objective with a known optimum. This verifies basic movement toward the expected solution without altering the production search rule.
 
-## 6. Tetrahedral Transition Algorithms
+## 6. Screw-Trajectory Bone-Density Features
+
+`pedicle_planning.ai.trajectory` evaluates a fully specified screw rather than an entry point. A `ScrewPlan` holds the entry point, direction, length, and diameter in the image's physical coordinate system.
+
+- **Sampling.** Points are placed on a uniform lattice (default 0.5 mm axially and in cross-section) inside the screw cylinder (`core`, radius ≤ D/2) and in a surrounding bone–screw interface annulus (`interface`, default 1 mm thick). A separate spherical region around the tip (default radius 4 mm) is sampled as `tip_sphere`.
+- **Interpolation.** Physical points are mapped to continuous voxel indices using origin, spacing, *and* the direction matrix, then sampled with trilinear interpolation. Points outside the image are reported as missing rather than padded with zeros.
+- **Segments.** The axis is split into `entry`, `pedicle`, `transition`, `body`, and `tip` segments. Defaults are length fractions (0, 0.2, 0.45, 0.6, 0.8, 1.0); explicit millimetre boundaries can be passed, e.g. from a future pedicle-isthmus detector.
+- **Bone membership.** An optional binary bone mask (nearest-neighbour lookup) or closed bone mesh restricts statistics to bone and yields the in-bone (purchase) length along the screw axis.
+- **Statistics.** For every segment × region: sample counts, bone fraction, mean, median, standard deviation, 10th/90th percentiles, coefficient of variation, low-density fraction (HU < 110 by default), and cortical fraction (HU ≥ 800 by default).
+- **Calibration.** Values are HU unless a `LinearCalibration` (e.g. from two phantom inserts) is supplied, in which case density statistics are reported in the calibrated unit; the threshold fractions still use HU.
+
+`TrajectoryFeatures.to_flat_dict()` flattens the result into named scalar features for downstream risk models. Default segment fractions and thresholds are engineering defaults, not anatomically or clinically validated values. This module is additive: it does not change the existing scorer or optimizer.
+
+## 7. Tetrahedral Transition Algorithms
 
 The FEA package contains transition templates for tetrahedral refinement and utilities that validate generated tetrahedra. Validation checks include element volume and orientation, duplicate elements, non-manifold faces, interface signatures, and elementary mesh-quality measures.
 
 Additional helpers group green-transition faces and triangulate shared interfaces consistently. The templates represent computational mesh preprocessing; they are not a complete adaptive meshing system or a claim of solver accuracy.
 
-## 7. Abaqus Export
+## 8. Abaqus Export
 
 The export layer writes nodes and four-node tetrahedral elements as Abaqus C3D4 part definitions and assembles generated parts into an Abaqus input structure. It can parse the relevant mesh text used by the writer and reports basic counts and status.
 

@@ -14,6 +14,10 @@ __all__ = [
     "EntryPointPredictor",
     "predictor",
     "config",
+    "ScrewPlan",
+    "LinearCalibration",
+    "TrajectorySamplingConfig",
+    "compute_trajectory_features",
 ]
 
 _EXPORT_MODULES = {
@@ -23,6 +27,10 @@ _EXPORT_MODULES = {
     "EntryPointPredictor": ".predictor",
     "predictor": ".predictor",
     "config": ".config",
+    "ScrewPlan": ".trajectory",
+    "LinearCalibration": ".trajectory",
+    "TrajectorySamplingConfig": ".trajectory",
+    "compute_trajectory_features": ".trajectory",
 }
 
 

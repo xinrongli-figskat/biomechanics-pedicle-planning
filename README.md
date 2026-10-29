@@ -16,8 +16,9 @@ mesh transition algorithms, and Abaqus C3D4 export.
 - CT HU preprocessing and voxel/world coordinate transformation
 - Geometry- and HU-aware entry-point scoring
 - Heuristic local-search optimization
+- Screw-trajectory sampling and segment-wise bone-density (HU/BMD) features
 - Tetrahedral transition and Abaqus export utilities
-- 17 synthetic tests with GitHub Actions CI
+- 34 synthetic tests with GitHub Actions CI
 - No real patient data or patient-derived geometry
 ## Overview
 
@@ -54,6 +55,7 @@ The repository exposes the individual computational components above. It is not 
 - PyVista/VTK geometry operations
 - Geometry-aware candidate generation and scoring
 - Heuristic local-search optimization
+- Screw-trajectory sampling and bone-density feature extraction
 - Tetrahedral transition templates and validation
 - Shared-face triangulation
 - Abaqus C3D4 part generation
@@ -80,13 +82,14 @@ The repository exposes the individual computational components above. It is not 
 
 ## Testing
 
-The current test suite contains 17 synthetic tests. They cover:
+The current test suite contains 34 synthetic tests. They cover:
 
 - HU preprocessing
 - Coordinate conversion and round trips
 - Synthetic geometry operations
 - Scoring behavior
 - Local-search optimization
+- Screw-trajectory sampling and bone-density features
 - Tetrahedra and C3D4 elements
 - Abaqus part and assembly writers
 - Transition templates and validation
