@@ -74,13 +74,25 @@ The synthetic optimizer test uses an analytic objective with a known optimum. Th
 
 The package contains no trained loosening-risk model; tests use a synthetic vertebra and a toy risk function.
 
-## 9. Tetrahedral Transition Algorithms
+## 9. Per-Vertebra Anatomical Frame
+
+`pedicle_planning.ai.vertebra_frame.estimate_vertebra_frame` derives the medial and cranial directions used by the candidate grid from a single-vertebra mask, so that axially rotated or tilted vertebrae (e.g. in scoliosis) are handled.
+
+- **Left–right axis.** The midsagittal plane through the mask centroid is found by maximizing mirror overlap of the mask (coarse-to-fine search, ±40° in axial rotation and coronal tilt around the image axes).
+- **Cranial axis.** Within that plane, the anterior 40 % of the vertebra (the body, excluding lamina and spinous process) is projected, and the direction of minimum 1st–99th percentile width (body height) is taken within ±30° of the initial direction. Using percentiles rather than variance avoids bias from asymmetric posterior structures; the trimmed range keeps small osteophytes from tilting the axis.
+- **Signs and origin.** Image patient directions (LPS by default) only fix axis signs and search start; the frame is right-handed (left = cranial × anterior). The origin is the body centroid projected onto the midsagittal plane.
+- **Per-screw frame.** `anatomical_frame_for(entry)` picks the side from the entry point and returns medial pointing to the midline.
+- **Quality flag.** `symmetry_score` is the mirror-overlap fraction; `reliable` is false below 0.85 (heuristic, to be calibrated on real segmentations). `image_axes_frame` is the fallback using image axes directly.
+
+On the synthetic vertebra, axes are recovered within about 1–2° for combined rotations up to 35° axial, 12° coronal, and 20° sagittal, including with an osteophyte-like spur or missing posterior elements on one side.
+
+## 10. Tetrahedral Transition Algorithms
 
 The FEA package contains transition templates for tetrahedral refinement and utilities that validate generated tetrahedra. Validation checks include element volume and orientation, duplicate elements, non-manifold faces, interface signatures, and elementary mesh-quality measures.
 
 Additional helpers group green-transition faces and triangulate shared interfaces consistently. The templates represent computational mesh preprocessing; they are not a complete adaptive meshing system or a claim of solver accuracy.
 
-## 10. Abaqus Export
+## 11. Abaqus Export
 
 The export layer writes nodes and four-node tetrahedral elements as Abaqus C3D4 part definitions and assembles generated parts into an Abaqus input structure. It can parse the relevant mesh text used by the writer and reports basic counts and status.
 

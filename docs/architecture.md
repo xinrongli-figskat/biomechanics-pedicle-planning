@@ -27,6 +27,9 @@ pedicle_planning.ai
 │       └── config
 ├── utils
 │   └── config
+├── vertebra_frame (per-vertebra anatomical frame from a vertebra mask)
+│   ├── candidates
+│   └── trajectory
 ├── candidates (candidate generation, safety constraints, risk minimization)
 │   └── trajectory
 ├── pedicle (pedicle isthmus detection and trajectory match)

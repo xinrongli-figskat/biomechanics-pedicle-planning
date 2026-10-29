@@ -18,8 +18,9 @@ mesh transition algorithms, and Abaqus C3D4 export.
 - Heuristic local-search optimization
 - Screw-trajectory sampling and segment-wise bone-density (HU/BMD) features
 - Pedicle isthmus detection and constrained, risk-based screw-plan candidate search
+- Automatic per-vertebra anatomical frame from a vertebra mask
 - Tetrahedral transition and Abaqus export utilities
-- 53 synthetic tests with GitHub Actions CI
+- 62 synthetic tests with GitHub Actions CI
 - No real patient data or patient-derived geometry
 ## Overview
 
@@ -84,7 +85,7 @@ The repository exposes the individual computational components above. It is not 
 
 ## Testing
 
-The current test suite contains 53 synthetic tests. They cover:
+The current test suite contains 62 synthetic tests. They cover:
 
 - HU preprocessing
 - Coordinate conversion and round trips
@@ -93,6 +94,7 @@ The current test suite contains 53 synthetic tests. They cover:
 - Local-search optimization
 - Screw-trajectory sampling and bone-density features
 - Pedicle isthmus detection and candidate optimization on a synthetic vertebra
+- Per-vertebra anatomical frame estimation
 - Tetrahedra and C3D4 elements
 - Abaqus part and assembly writers
 - Transition templates and validation

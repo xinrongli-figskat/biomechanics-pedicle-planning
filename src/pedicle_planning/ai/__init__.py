@@ -22,6 +22,8 @@ __all__ = [
     "AnatomicalFrame",
     "generate_candidates",
     "optimize_screw_plan",
+    "estimate_vertebra_frame",
+    "image_axes_frame",
 ]
 
 _EXPORT_MODULES = {
@@ -39,6 +41,8 @@ _EXPORT_MODULES = {
     "AnatomicalFrame": ".candidates",
     "generate_candidates": ".candidates",
     "optimize_screw_plan": ".candidates",
+    "estimate_vertebra_frame": ".vertebra_frame",
+    "image_axes_frame": ".vertebra_frame",
 }
 
 
