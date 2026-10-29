@@ -24,6 +24,7 @@ __all__ = [
     "optimize_screw_plan",
     "estimate_vertebra_frame",
     "image_axes_frame",
+    "compute_vertebral_body_bmd",
 ]
 
 _EXPORT_MODULES = {
@@ -43,6 +44,7 @@ _EXPORT_MODULES = {
     "optimize_screw_plan": ".candidates",
     "estimate_vertebra_frame": ".vertebra_frame",
     "image_axes_frame": ".vertebra_frame",
+    "compute_vertebral_body_bmd": ".vertebral_body",
 }
 
 

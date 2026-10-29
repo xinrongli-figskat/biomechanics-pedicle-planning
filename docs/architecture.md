@@ -27,6 +27,9 @@ pedicle_planning.ai
 │       └── config
 ├── utils
 │   └── config
+├── vertebral_body (whole vertebral-body trabecular bone density)
+│   ├── vertebra_frame
+│   └── trajectory
 ├── vertebra_frame (per-vertebra anatomical frame from a vertebra mask)
 │   ├── candidates
 │   └── trajectory

@@ -22,56 +22,10 @@ if HAS_IMAGING_DEPS:
         image_axes_frame,
     )
 
+    from synthetic_vertebra import CENTER, _synthetic_vertebra
 
-CENTER = (60.0, 60.0, 60.0)
+
 FAST = None if not HAS_IMAGING_DEPS else VertebraFrameConfig(MAX_SAMPLE_POINTS=8000)
-
-
-def _true_axes(axial=0.0, coronal=0.0, sagittal=0.0):
-    """Columns are the true (left, anterior, cranial) axes in LPS physical coordinates."""
-    left, anterior, cranial = np.array([1.0, 0, 0]), np.array([0, -1.0, 0]), np.array([0, 0, 1.0])
-    t = math.radians(axial)
-    anterior = math.cos(t) * anterior - math.sin(t) * left
-    left = np.cross(cranial, anterior)
-    t = math.radians(coronal)
-    cranial = math.cos(t) * cranial - math.sin(t) * left
-    left = np.cross(cranial, anterior)
-    t = math.radians(sagittal)
-    cranial = math.cos(t) * cranial + math.sin(t) * anterior
-    anterior = np.cross(left, cranial)
-    return np.stack([left, anterior, cranial], axis=1)
-
-
-def _local_coords(axes, size=120):
-    k, j, i = np.meshgrid(*(np.arange(size),) * 3, indexing="ij")
-    p = np.stack([i, j, k], -1).reshape(-1, 3).astype(np.float64) - np.asarray(CENTER)
-    q = p @ axes
-    return q[:, 0], q[:, 1], q[:, 2]
-
-
-def _synthetic_vertebra(axial=0.0, coronal=0.0, sagittal=0.0, spur=False, remove=None):
-    """
-    Bilaterally symmetric vertebra in local (left, anterior, cranial) coordinates:
-    elliptical body, pedicles, lamina, caudally sloping spinous process and
-    transverse processes; rotated by the given angles about CENTER (1 mm voxels).
-    """
-    axes = _true_axes(axial, coronal, sagittal)
-    l, a, s = _local_coords(axes)
-    body = ((l / 22) ** 2 + ((a - 12) / 16) ** 2 <= 1) & (np.abs(s) <= 12)
-    pedicles = (((np.abs(l) - 12) / 4) ** 2 + (s / 6) ** 2 <= 1) & (a >= -14) & (a <= -2)
-    lamina = (np.abs(l) <= 14) & (a >= -22) & (a <= -14) & (np.abs(s) <= 8)
-    drop = 0.3 * np.clip(-a - 22, 0, None)
-    spinous = (np.abs(l) <= 3) & (a >= -45) & (a <= -22) & (s >= -12 - drop) & (s <= 2 - drop)
-    transverse = (np.abs(l) >= 14) & (np.abs(l) <= 35) & (a >= -12) & (a <= -6) & (np.abs(s) <= 4)
-    bone = body | pedicles | lamina | spinous | transverse
-    if spur:
-        bone |= (np.abs(l) <= 3) & (a >= 22) & (a <= 26) & (s >= 12) & (s <= 16)
-    if remove == "right_posterior":
-        bone &= ~((l < -10) & (a < -1))
-    elif remove == "right_half":
-        bone &= ~(l < 0)
-    mask = sitk.GetImageFromArray(bone.reshape(120, 120, 120).astype(np.uint8))
-    return mask, axes
 
 
 def _angle(u, v):

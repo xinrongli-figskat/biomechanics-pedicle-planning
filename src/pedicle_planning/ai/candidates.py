@@ -304,6 +304,7 @@ class ConstraintContext:
     bone_mask: object = None
     bone_mesh: object = None
     pedicle: object = None
+    frame: object = None
 
 
 def diameter_within_isthmus(margin_mm: float = 1.0):
@@ -452,11 +453,16 @@ def entry_displacement(baseline: ScrewPlan, plan: ScrewPlan, frame: AnatomicalFr
 
 def candidate_features(image, candidate: Candidate, ctx: ConstraintContext,
                        calibration=None, sampling_config: TrajectorySamplingConfig = None) -> dict:
-    """计算候选方案的风险模型输入特征（钉道骨密度特征 + 轨迹匹配特征）。"""
+    """
+    计算候选方案的风险模型输入特征
+
+    钉道骨密度特征（ctx.frame 存在时含内外侧/头尾侧半环）+ 可用时的 match_* 轨迹匹配特征。
+    """
     bounds = ctx.pedicle.segment_bounds_for(candidate.plan) if ctx.pedicle is not None else None
     features = compute_trajectory_features(
         image, candidate.plan, bone_mask=ctx.bone_mask, bone_mesh=ctx.bone_mesh,
         calibration=calibration, config=sampling_config, segment_bounds_mm=bounds,
+        frame=ctx.frame,
     ).to_flat_dict()
     if ctx.pedicle is not None:
         for key, value in ctx.pedicle.trajectory_match(candidate.plan).items():
@@ -469,7 +475,7 @@ def optimize_screw_plan(image, baseline: ScrewPlan, frame: AnatomicalFrame, risk
                         grid: CandidateGridConfig = None, lengths: tuple = None,
                         diameters: tuple = None, calibration=None,
                         sampling_config: TrajectorySamplingConfig = None,
-                        pivot_point=None) -> OptimizationResult:
+                        pivot_point=None, patient_features: dict = None) -> OptimizationResult:
     """
     在安全约束下搜索预测松动风险最低的置钉方案
 
@@ -492,16 +498,25 @@ def optimize_screw_plan(image, baseline: ScrewPlan, frame: AnatomicalFrame, risk
         候选网格，含支点（PIVOT）与进钉点贴合骨面（SNAP_ENTRY）设置
     pivot_point : tuple, optional
         PIVOT="isthmus" 时显式指定支点（默认取基准钉轴与峡部截面的交点）
+    patient_features : dict, optional
+        不随置钉方案变化的患者固有特征（如 VertebralBodyBMD.to_flat_dict()、年龄），
+        合并进每个候选的特征字典后再传给 risk_fn；键名不得与钉道特征重复
     """
     if constraints is None:
         constraints = default_constraints()
-    ctx = ConstraintContext(image=image, bone_mask=bone_mask, bone_mesh=bone_mesh, pedicle=pedicle)
+    ctx = ConstraintContext(image=image, bone_mask=bone_mask, bone_mesh=bone_mesh, pedicle=pedicle,
+                            frame=frame)
+    patient_features = dict(patient_features or {})
 
     evaluations = []
     candidates = generate_candidates(baseline, frame, grid, lengths, diameters, pedicle=pedicle,
                                      pivot_point=pivot_point, bone_mask=bone_mask, bone_mesh=bone_mesh)
     for candidate in candidates:
         features = candidate_features(image, candidate, ctx, calibration, sampling_config)
+        clash = features.keys() & patient_features.keys()
+        if clash:
+            raise ValueError(f"patient_features keys clash with trajectory features: {sorted(clash)[:5]}")
+        features.update(patient_features)
         violations = [msg for msg in (check(candidate, features, ctx) for check in constraints) if msg]
         feasible = not violations
         risk = float(risk_fn(features)) if (feasible or candidate.is_baseline) else float("nan")

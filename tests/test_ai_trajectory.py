@@ -15,7 +15,9 @@ if HAS_IMAGING_DEPS:
     import pyvista as pv
     import SimpleITK as sitk
 
+    from pedicle_planning.ai.candidates import AnatomicalFrame
     from pedicle_planning.ai.trajectory import (
+        SECTOR_REGION_NAMES,
         SEGMENT_NAMES,
         LinearCalibration,
         ScrewPlan,
@@ -198,6 +200,42 @@ class TrajectoryFeatureTests(unittest.TestCase):
         self.assertAlmostEqual(features.whole["all"].mean, 200.0, places=3)
         with self.assertRaises(ValueError):
             LinearCalibration.from_two_points(100.0, 1.0, 100.0, 2.0)
+
+    def test_medial_lateral_half_rings(self):
+        # Density rises toward +y (medial); independent of z (cranial).
+        image = _image_from_function(lambda x, y, z: 200.0 + 50.0 * (y - 15.0))
+        frame = AnatomicalFrame(medial=(0.0, 1.0, 0.0), cranial=(0.0, 0.0, 1.0))
+        features = compute_trajectory_features(image, self.plan, frame=frame)
+        whole = features.whole
+        # centroid offset of a half annulus r in [3, 4] mm: 4/(3*pi) * (4^3 - 3^3) / (4^2 - 3^2)
+        offset = 4.0 / (3.0 * math.pi) * (64.0 - 27.0) / (16.0 - 9.0)
+        self.assertAlmostEqual(whole["interface_medial"].mean - whole["interface_lateral"].mean,
+                               2 * 50.0 * offset, delta=0.1 * 2 * 50.0 * offset)
+        self.assertAlmostEqual(whole["interface_cranial"].mean, whole["interface_caudal"].mean, delta=1e-3)
+        self.assertAlmostEqual(whole["interface_cranial"].mean, whole["interface"].mean, delta=1e-3)
+        n_halves = whole["interface_medial"].n_samples + whole["interface_lateral"].n_samples
+        self.assertLessEqual(n_halves, whole["interface"].n_samples)
+        self.assertGreater(n_halves, 0.9 * whole["interface"].n_samples)
+        self.assertEqual(whole["interface_medial"].n_samples, whole["interface_lateral"].n_samples)
+        flat = features.to_flat_dict()
+        for name in SEGMENT_NAMES:
+            for region in SECTOR_REGION_NAMES:
+                self.assertIn(f"{name}_{region}_mean", flat)
+
+    def test_half_rings_follow_the_frame_not_the_image_axes(self):
+        image = _image_from_function(lambda x, y, z: 200.0 + 50.0 * (z - 15.0))
+        tilted = ScrewPlan((5.0, 15.0, 15.0), (1.0, 0.3, 0.0), 40.0, 6.0)
+        frame = AnatomicalFrame(medial=(0.0, 1.0, 0.0), cranial=(0.0, 0.0, 1.0))
+        whole = compute_trajectory_features(image, tilted, frame=frame).whole
+        self.assertGreater(whole["interface_cranial"].mean - whole["interface_caudal"].mean, 150.0)
+        self.assertAlmostEqual(whole["interface_medial"].mean, whole["interface_lateral"].mean, delta=1e-3)
+        with self.assertRaises(ValueError):
+            compute_trajectory_features(image, tilted, frame=AnatomicalFrame((1.0, 0.3, 0.0), (0.0, 0.0, 1.0)))
+
+    def test_no_sector_features_without_frame(self):
+        image = _image_from_function(lambda x, y, z: np.full_like(x, 300.0))
+        flat = compute_trajectory_features(image, self.plan).to_flat_dict()
+        self.assertFalse(any("interface_medial" in key for key in flat))
 
     def test_flat_dict_is_complete(self):
         image = _image_from_function(lambda x, y, z: 10.0 * x)

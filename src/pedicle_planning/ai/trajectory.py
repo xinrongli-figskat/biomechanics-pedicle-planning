@@ -22,6 +22,7 @@ import SimpleITK as sitk
 
 SEGMENT_NAMES = ("entry", "pedicle", "transition", "body", "tip")
 REGION_NAMES = ("core", "interface", "all")
+SECTOR_REGION_NAMES = ("interface_medial", "interface_lateral", "interface_cranial", "interface_caudal")
 
 
 @dataclass(frozen=True)
@@ -178,7 +179,9 @@ class TrajectoryFeatures:
     钉道骨密度特征
 
     segments[段名][区域名] -> RegionStats，段名见 SEGMENT_NAMES，
-    区域名见 REGION_NAMES（core: 钉芯，interface: 界面环带，all: 二者合并）。
+    区域名见 REGION_NAMES（core: 钉芯，interface: 界面环带，all: 二者合并）；
+    提供解剖方向 frame 时另含 SECTOR_REGION_NAMES：界面环带的内侧/外侧半环与
+    头侧/尾侧半环（以垂直于钉轴的内侧、头侧方向划分，各占180°）。
     in_bone_length 为钉轴中心线位于骨内（且在图像内）的长度；未提供骨掩膜/网格时
     仅反映位于图像内的长度。
     """
@@ -242,6 +245,7 @@ def sample_screw_points(plan: ScrewPlan, config: TrajectorySamplingConfig = None
         t: (N,) 沿钉轴距进钉点的距离（毫米）
         r: (N,) 到钉轴的径向距离（毫米）
         is_core: (N,) 是否位于螺钉外径以内
+        offsets: (N, 3) 采样点相对钉轴的垂直偏移向量
         axis_points: (M, 3) 钉轴中心线采样点
         axis_t: (M,) 中心线采样点的轴向位置
     """
@@ -276,6 +280,7 @@ def sample_screw_points(plan: ScrewPlan, config: TrajectorySamplingConfig = None
         "t": t,
         "r": r,
         "is_core": r <= core_radius + 1e-9,
+        "offsets": offsets,
         "axis_points": entry + np.outer(axis_t, direction),
         "axis_t": axis_t,
     }
@@ -384,6 +389,41 @@ def _bone_membership(points, bone_mask, bone_mesh) -> np.ndarray:
     return np.ones(len(points), dtype=bool)
 
 
+def _perpendicular_unit(vector, axis: np.ndarray, name: str) -> np.ndarray:
+    v = np.asarray(vector, dtype=np.float64)
+    v = v - np.dot(v, axis) * axis
+    norm = np.linalg.norm(v)
+    if norm < 1e-6:
+        raise ValueError(f"{name} direction must not be parallel to the screw axis")
+    return v / norm
+
+
+def sector_masks(offsets: np.ndarray, direction, frame) -> dict:
+    """
+    按解剖方向把采样点划分为内侧/外侧、头侧/尾侧半环
+
+    Parameters
+    ----------
+    offsets : (N, 3)
+        采样点相对钉轴的垂直偏移（sample_screw_points 的 offsets）
+    direction : tuple
+        钉轴方向
+    frame : object
+        具有 medial、cranial 属性的解剖方向（如 AnatomicalFrame）
+    """
+    axis = np.asarray(direction, dtype=np.float64)
+    medial = _perpendicular_unit(frame.medial, axis, "medial")
+    cranial = _perpendicular_unit(frame.cranial, axis, "cranial")
+    m = offsets @ medial
+    c = offsets @ cranial
+    return {
+        "interface_medial": m > 1e-9,
+        "interface_lateral": m < -1e-9,
+        "interface_cranial": c > 1e-9,
+        "interface_caudal": c < -1e-9,
+    }
+
+
 def _region_stats(values: np.ndarray, in_bone: np.ndarray, hu_values: np.ndarray,
                   config: TrajectorySamplingConfig) -> RegionStats:
     n_samples = int(values.size)
@@ -420,7 +460,8 @@ def compute_trajectory_features(image: sitk.Image, plan: ScrewPlan,
                                 bone_mask: sitk.Image = None, bone_mesh=None,
                                 calibration: LinearCalibration = None,
                                 config: TrajectorySamplingConfig = None,
-                                segment_bounds_mm: tuple = None) -> TrajectoryFeatures:
+                                segment_bounds_mm: tuple = None,
+                                frame=None) -> TrajectoryFeatures:
     """
     计算给定螺钉方案的钉道骨密度特征
 
@@ -440,6 +481,9 @@ def compute_trajectory_features(image: sitk.Image, plan: ScrewPlan,
         采样配置
     segment_bounds_mm : tuple, optional
         6个分界值（毫米，0到螺钉长度），覆盖 SEGMENT_FRACTIONS
+    frame : object, optional
+        具有 medial、cranial 属性的解剖方向（如 AnatomicalFrame）；提供时
+        额外计算界面环带的内侧/外侧、头侧/尾侧半环统计
 
     Returns
     -------
@@ -468,6 +512,9 @@ def compute_trajectory_features(image: sitk.Image, plan: ScrewPlan,
         "interface": ~is_core,
         "all": np.ones_like(is_core),
     }
+    if frame is not None:
+        for name, sector in sector_masks(samples["offsets"], plan.direction, frame).items():
+            region_masks[name] = ~is_core & sector
 
     segments = {}
     for k, name in enumerate(SEGMENT_NAMES):

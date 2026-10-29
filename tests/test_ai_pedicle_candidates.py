@@ -282,6 +282,27 @@ class PedicleAndOptimizationTests(unittest.TestCase):
         self.assertIn("match_angle_deg", result.best.features)
         self.assertIn("pedicle_core_mean", result.best.features)
 
+    def test_sector_and_patient_features_reach_risk_function(self):
+        seen = []
+
+        def risk_fn(features):
+            seen.append(features)
+            return -features["pedicle_interface_medial_mean"]
+
+        grid = CandidateGridConfig(MEDIAL_OFFSETS_MM=(0.0,), MEDIAL_ANGLES_DEG=(0.0,),
+                                   LENGTH_OFFSETS_MM=(0.0,), DIAMETER_OFFSETS_MM=(0.0,))
+        optimize_screw_plan(self.ct, self.baseline, self.frame, risk_fn, bone_mask=self.mask,
+                            pedicle=self.pedicle, grid=grid,
+                            patient_features={"vertebra_midbody_mean": 140.0, "age": 70})
+        self.assertTrue(seen)
+        for features in seen:
+            self.assertEqual(features["vertebra_midbody_mean"], 140.0)
+            self.assertEqual(features["age"], 70)
+            self.assertIn("transition_interface_caudal_p10", features)
+        with self.assertRaises(ValueError):
+            optimize_screw_plan(self.ct, self.baseline, self.frame, lambda f: 0.0, bone_mask=self.mask,
+                                pedicle=self.pedicle, grid=grid, patient_features={"in_bone_length": 1.0})
+
     def test_no_feasible_candidate(self):
         result = optimize_screw_plan(self.ct, self.baseline, self.frame, lambda f: 0.0,
                                      bone_mask=self.mask, pedicle=self.pedicle,

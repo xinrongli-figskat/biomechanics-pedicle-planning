@@ -47,6 +47,7 @@ The synthetic optimizer test uses an analytic objective with a known optimum. Th
 - **Segments.** The axis is split into `entry`, `pedicle`, `transition`, `body`, and `tip` segments. Defaults are length fractions (0, 0.2, 0.45, 0.6, 0.8, 1.0); explicit millimetre boundaries can be passed, e.g. from a future pedicle-isthmus detector.
 - **Bone membership.** An optional binary bone mask (nearest-neighbour lookup) or closed bone mesh restricts statistics to bone and yields the in-bone (purchase) length along the screw axis.
 - **Statistics.** For every segment × region: sample counts, bone fraction, mean, median, standard deviation, 10th/90th percentiles, coefficient of variation, low-density fraction (HU < 110 by default), and cortical fraction (HU ≥ 800 by default).
+- **Directional half-rings.** When an anatomical frame (medial and cranial directions) is passed, the interface annulus is additionally split into medial/lateral and cranial/caudal 180° halves, using the frame directions projected perpendicular to the screw axis (`interface_medial`, `interface_lateral`, `interface_cranial`, `interface_caudal` for every segment). This raises the flat feature count from 214 to 478; `optimize_screw_plan` passes the screw's frame automatically.
 - **Calibration.** Values are HU unless a `LinearCalibration` (e.g. from two phantom inserts) is supplied, in which case density statistics are reported in the calibrated unit; the threshold fractions still use HU.
 
 `TrajectoryFeatures.to_flat_dict()` flattens the result into named scalar features for downstream risk models. Default segment fractions and thresholds are engineering defaults, not anatomically or clinically validated values. This module is additive: it does not change the existing scorer or optimizer.
@@ -86,13 +87,24 @@ The package contains no trained loosening-risk model; tests use a synthetic vert
 
 On the synthetic vertebra, axes are recovered within about 1–2° for combined rotations up to 35° axial, 12° coronal, and 20° sagittal, including with an osteophyte-like spur or missing posterior elements on one side.
 
-## 10. Tetrahedral Transition Algorithms
+## 10. Whole Vertebral-Body Bone Density
+
+`pedicle_planning.ai.vertebral_body.compute_vertebral_body_bmd` gives patient-intrinsic density features that do not change with the screw plan.
+
+- **Body region.** In the per-vertebra frame (Section 9), the anterior 40 % of the vertebra along the anteroposterior axis is taken as the vertebral body, excluding pedicles, lamina, and spinous process.
+- **Trabecular region.** The body is eroded by 3 mm to remove the cortical shell and endplates (`trabecular`).
+- **Mid-body slab.** A 10 mm slab centred at mid-height of the body (1st–99th percentile extent along the cranial axis) approximates the clinical mid-vertebral cancellous ROI (`midbody`).
+- **Output.** The same statistics as the trajectory regions, plus body and trabecular volume and body height; optional linear HU→BMD calibration. `to_flat_dict()` results can be passed to `optimize_screw_plan(patient_features=...)`, which merges them into every candidate's features (key clashes are rejected).
+
+The ROI is fully automatic and three-dimensional, so it is not identical to manually placed single-slice clinical ROIs; values should be compared with those only after validation.
+
+## 11. Tetrahedral Transition Algorithms
 
 The FEA package contains transition templates for tetrahedral refinement and utilities that validate generated tetrahedra. Validation checks include element volume and orientation, duplicate elements, non-manifold faces, interface signatures, and elementary mesh-quality measures.
 
 Additional helpers group green-transition faces and triangulate shared interfaces consistently. The templates represent computational mesh preprocessing; they are not a complete adaptive meshing system or a claim of solver accuracy.
 
-## 11. Abaqus Export
+## 12. Abaqus Export
 
 The export layer writes nodes and four-node tetrahedral elements as Abaqus C3D4 part definitions and assembles generated parts into an Abaqus input structure. It can parse the relevant mesh text used by the writer and reports basic counts and status.
 
