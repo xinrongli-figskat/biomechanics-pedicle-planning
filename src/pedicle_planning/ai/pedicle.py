@@ -63,6 +63,13 @@ class IsthmusDetectionConfig:
     REFINE: bool = True
     """是否沿拟合的椎弓根轴线重新切片。"""
 
+    MIN_INNER_DOMINANCE: float = 0.7
+    """
+    提供CT时，截面内含钉轴的松质骨连通块占全部松质骨的最小比例。低于该值说明
+    切面横跨了皮质壁（如椎弓根-椎体交界处的椎体后壁），内径无意义，该截面不参与
+    峡部选择；若所有截面都不满足，则退回仅按窗口条件选择。
+    """
+
     def validate(self) -> None:
         for name in ("AXIAL_STEP", "CROSS_STEP", "WINDOW_RADIUS", "ANGLE_STEP_DEG"):
             if not getattr(self, name) > 0:
@@ -72,6 +79,8 @@ class IsthmusDetectionConfig:
         lo, hi = self.SEARCH_RANGE
         if not 0.0 <= lo < hi <= 1.0:
             raise ValueError(f"SEARCH_RANGE ({self.SEARCH_RANGE}) must satisfy 0 <= lo < hi <= 1")
+        if not 0.0 <= self.MIN_INNER_DOMINANCE <= 1.0:
+            raise ValueError(f"MIN_INNER_DOMINANCE ({self.MIN_INNER_DOMINANCE}) must be in [0, 1]")
         for name in ("PEDICLE_AREA_FACTOR", "AXIS_FIT_AREA_FACTOR"):
             if not getattr(self, name) >= 1.0:
                 raise ValueError(f"{name} ({getattr(self, name)}) must be >= 1")
@@ -83,7 +92,9 @@ class CrossSection:
     单个垂直切片上的骨截面
 
     grid_u/grid_v 为切片平面内各像素的二维坐标（毫米，相对切片中心，沿 u/v 轴），
-    outer 为包含钉轴的骨连通域，inner 为其中的松质骨通道（无CT时为 None）。
+    outer 为包含钉轴的骨连通域，inner 为其中的松质骨通道（无CT时为 None）；
+    inner_dominance 为 inner 占截面内全部松质骨的比例（无CT时为 NaN）；
+    contains_center 表示切片中心（钉轴点）本身位于 outer 内（未经吸附）。
     """
 
     t: float
@@ -97,8 +108,10 @@ class CrossSection:
     outer: np.ndarray
     inner: np.ndarray
     touches_window: bool
+    contains_center: bool
     area_outer: float
     area_inner: float
+    inner_dominance: float
     centroid: np.ndarray
     min_width_outer: float
     min_width_inner: float
@@ -131,7 +144,7 @@ class PedicleGeometry:
     椎弓根几何
 
     isthmus 为峡部截面，axis 为拟合的椎弓根轴线方向（与基准螺钉同向），
-    section_normal 为切片平面法向（REFINE 生效时即 axis，否则为基准钉轴），
+    section_normal 为椎弓根段起止平面的法向（第一次切片所用的基准钉轴方向），
     start_point/end_point 为椎弓根段起止平面（法向 section_normal）上的点。
     profile 记录每个切片的 (沿切片线的位置, 外截面积, 是否触及窗口)。
     """
@@ -279,12 +292,15 @@ def extract_cross_section(bone_mask: sitk.Image, center, normal, t: float = 0.0,
         return None
 
     inner = None
+    inner_dominance = float("nan")
     if image is not None:
         hu = sample_image_trilinear(image, points).reshape(grid_u.shape)
         cancellous = outer & np.isfinite(hu) & (hu < config.CORTICAL_HU)
         inner = _component_at(cancellous, grid_u, grid_v, 0.0, 0.0, config.CENTER_SNAP)
         if inner is None:
             inner = np.zeros_like(outer)
+        total = np.count_nonzero(cancellous)
+        inner_dominance = float(np.count_nonzero(inner) / total) if total else 0.0
 
     border = np.zeros_like(outer)
     border[0, :] = border[-1, :] = border[:, 0] = border[:, -1] = True
@@ -306,8 +322,10 @@ def extract_cross_section(bone_mask: sitk.Image, center, normal, t: float = 0.0,
         outer=outer,
         inner=inner,
         touches_window=bool(np.any(outer & border)),
+        contains_center=bool(outer[half, half]),
         area_outer=float(np.count_nonzero(outer) * pixel_area),
         area_inner=float(np.count_nonzero(inner) * pixel_area) if inner is not None else float("nan"),
+        inner_dominance=inner_dominance,
         centroid=center + cu * np.asarray(u) + cv * np.asarray(v),
         min_width_outer=width_outer,
         min_width_inner=width_inner,
@@ -320,17 +338,35 @@ def _profile(bone_mask, image, origin, direction, t_values, config) -> list:
             for t in t_values]
 
 
-def _isthmus_index(sections) -> int:
-    valid = [i for i, s in enumerate(sections) if s is not None and not s.touches_window]
+def _enclosed(section) -> bool:
+    return section is not None and not section.touches_window and section.contains_center
+
+
+def _single_channel(section, min_inner_dominance: float) -> bool:
+    return (not np.isfinite(section.inner_dominance)) or section.inner_dominance >= min_inner_dominance
+
+
+def _eligible_sections(sections, min_inner_dominance: float) -> list:
+    """可参与峡部选择的截面：封闭、钉轴点在骨内，且（有CT时）松质骨以单一通道为主；
+    若没有截面满足通道条件，退回仅按封闭条件。"""
+    enclosed = [_enclosed(s) for s in sections]
+    eligible = [e and _single_channel(s, min_inner_dominance) for e, s in zip(enclosed, sections)]
+    return eligible if any(eligible) else enclosed
+
+
+def _isthmus_index(sections, min_inner_dominance: float = 0.0) -> int:
+    eligible = _eligible_sections(sections, min_inner_dominance)
+    valid = [i for i, ok in enumerate(eligible) if ok]
     if not valid:
         return None
     return min(valid, key=lambda i: sections[i].area_outer)
 
 
-def _contiguous_range(sections, center_idx, max_area) -> tuple:
+def _contiguous_range(sections, center_idx, max_area, min_inner_dominance: float = 0.0) -> tuple:
+    eligible = _eligible_sections(sections, min_inner_dominance)
+
     def ok(i):
-        s = sections[i]
-        return s is not None and not s.touches_window and s.area_outer <= max_area
+        return eligible[i] and sections[i].area_outer <= max_area
 
     lo = hi = center_idx
     while lo - 1 >= 0 and ok(lo - 1):
@@ -381,39 +417,43 @@ def detect_pedicle_isthmus(bone_mask: sitk.Image, plan: ScrewPlan, image: sitk.I
     t_values = np.arange(lo_t, hi_t + 1e-9, config.AXIAL_STEP)
 
     sections = _profile(bone_mask, image, entry, direction, t_values, config)
-    idx = _isthmus_index(sections)
+    idx = _isthmus_index(sections, config.MIN_INNER_DOMINANCE)
     if idx is None:
         raise ValueError("no enclosed bone cross-section found along the screw axis; "
                          "check that the baseline screw passes through the pedicle")
 
-    fit_lo, fit_hi = _contiguous_range(sections, idx, config.AXIS_FIT_AREA_FACTOR * sections[idx].area_outer)
+    fit_lo, fit_hi = _contiguous_range(sections, idx, config.AXIS_FIT_AREA_FACTOR * sections[idx].area_outer,
+                                       config.MIN_INNER_DOMINANCE)
     axis = _fit_axis(sections, fit_lo, fit_hi, direction)
-    line_origin, line_dir = entry, direction
 
-    if config.REFINE and np.degrees(np.arccos(np.clip(np.dot(axis, direction), -1.0, 1.0))) > 0.5:
-        origin = sections[idx].centroid
-        refined_t = np.arange(lo_t - t_values[idx], hi_t - t_values[idx] + 1e-9, config.AXIAL_STEP)
-        refined = _profile(bone_mask, image, origin, axis, refined_t, config)
-        refined_idx = _isthmus_index(refined)
-        if refined_idx is not None:
-            sections, idx, t_values = refined, refined_idx, refined_t
-            line_origin, line_dir = origin, axis
-
-    ped_lo, ped_hi = _contiguous_range(sections, idx, config.PEDICLE_AREA_FACTOR * sections[idx].area_outer)
+    # The pedicle segment is delimited on the first-pass profile (planes normal to the baseline axis).
+    ped_lo, ped_hi = _contiguous_range(sections, idx, config.PEDICLE_AREA_FACTOR * sections[idx].area_outer,
+                                       config.MIN_INNER_DOMINANCE)
     half_step = 0.5 * config.AXIAL_STEP
-    start_point = line_origin + (t_values[ped_lo] - half_step) * line_dir
-    end_point = line_origin + (t_values[ped_hi] + half_step) * line_dir
-
+    start_point = entry + (t_values[ped_lo] - half_step) * direction
+    end_point = entry + (t_values[ped_hi] + half_step) * direction
     profile = [
         (float(t), float(s.area_outer) if s is not None else float("nan"),
          bool(s.touches_window) if s is not None else False)
         for t, s in zip(t_values, sections)
     ]
     isthmus = sections[idx]
+
+    # Refinement only corrects the obliquity of the isthmus section: re-slice perpendicular to the
+    # fitted axis close to the first-pass isthmus instead of searching the whole range again.
+    if config.REFINE and np.degrees(np.arccos(np.clip(np.dot(axis, direction), -1.0, 1.0))) > 0.5:
+        origin = isthmus.centroid
+        reach = max(t_values[idx] - t_values[fit_lo], t_values[fit_hi] - t_values[idx]) + config.AXIAL_STEP
+        refined_t = np.arange(-reach, reach + 1e-9, 0.5 * config.AXIAL_STEP)
+        refined = _profile(bone_mask, image, origin, axis, refined_t, config)
+        refined_idx = _isthmus_index(refined, config.MIN_INNER_DOMINANCE)
+        # a much smaller refined section means the oblique re-slice slipped off the pedicle
+        if refined_idx is not None and refined[refined_idx].area_outer >= 0.6 * isthmus.area_outer:
+            isthmus = refined[refined_idx]
     return PedicleGeometry(
         isthmus=isthmus,
         axis=np.asarray(axis),
-        section_normal=np.asarray(line_dir),
+        section_normal=np.asarray(direction),
         start_point=start_point,
         end_point=end_point,
         profile=profile,

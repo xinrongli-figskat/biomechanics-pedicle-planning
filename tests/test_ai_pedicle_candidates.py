@@ -29,6 +29,8 @@ if HAS_IMAGING_DEPS:
     from pedicle_planning.ai.pedicle import IsthmusDetectionConfig, detect_pedicle_isthmus
     from pedicle_planning.ai.trajectory import ScrewPlan
 
+    from synthetic_vertebra import CENTER, synthetic_vertebra_ct
+
 
 PEDICLE_TILT_DEG = 10.0
 ISTHMUS_X = 14.0
@@ -313,6 +315,28 @@ class PedicleAndOptimizationTests(unittest.TestCase):
         self.assertEqual(result.n_feasible, 0)
         self.assertTrue(math.isnan(result.summary()["best_risk"]))
         self.assertFalse(result.summary()["baseline_feasible"])
+
+
+@unittest.skipUnless(HAS_IMAGING_DEPS, "NumPy, SimpleITK, PyVista, and VTK are required")
+class IsthmusRobustnessTests(unittest.TestCase):
+    """Regression: on the rotated full-vertebra phantom the isthmus must stay inside the pedicle
+    (local anterior coordinate -14..-2) instead of slipping to the pedicle-body junction, where the
+    section crosses the posterior body wall and splits the cancellous channel."""
+
+    def test_isthmus_stays_in_pedicle_for_rotated_vertebrae(self):
+        for rotation in (15.0, -20.0):
+            ct, mask, axes = synthetic_vertebra_ct(rotation, 0.0, 0.0)
+            for side in (1.0, -1.0):
+                with self.subTest(rotation=rotation, side=side):
+                    entry = np.asarray(CENTER) + axes @ np.array([13.0 * side, -22.0, 0.0])
+                    tip = np.asarray(CENTER) + axes @ np.array([8.0 * side, 18.0, 0.0])
+                    ped = detect_pedicle_isthmus(mask, ScrewPlan.from_entry_tip(entry, tip, 3.0), image=ct)
+                    local = (ped.isthmus_point - np.asarray(CENTER)) @ axes
+                    self.assertGreater(local[1], -10.0)
+                    self.assertLess(local[1], -3.0)
+                    self.assertGreaterEqual(ped.isthmus.inner_dominance, 0.7)
+                    self.assertGreater(ped.inner_min_width, 4.5)
+                    self.assertGreater(ped.outer_min_width, 7.0)
 
 
 if __name__ == "__main__":

@@ -40,7 +40,10 @@ def _synthetic_vertebra(axial=0.0, coronal=0.0, sagittal=0.0, spur=False, remove
     axes = _true_axes(axial, coronal, sagittal)
     l, a, s = _local_coords(axes)
     body = ((l / 22) ** 2 + ((a - 12) / 16) ** 2 <= 1) & (np.abs(s) <= 12)
-    pedicles = (((np.abs(l) - 12) / 4) ** 2 + (s / 6) ** 2 <= 1) & (a >= -14) & (a <= -2)
+    # hourglass pedicles: narrowest (half-width 4 mm) at a = -8, widening toward lamina and body
+    pedicle_half_width = 4.0 + 0.04 * (a + 8.0) ** 2
+    pedicles = ((((np.abs(l) - 12) / pedicle_half_width) ** 2 + (s / (1.5 * pedicle_half_width)) ** 2 <= 1)
+                & (a >= -14) & (a <= -2))
     lamina = (np.abs(l) <= 14) & (a >= -22) & (a <= -14) & (np.abs(s) <= 8)
     drop = 0.3 * np.clip(-a - 22, 0, None)
     spinous = (np.abs(l) <= 3) & (a >= -45) & (a <= -22) & (s >= -12 - drop) & (s <= 2 - drop)
