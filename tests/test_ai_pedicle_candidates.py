@@ -12,6 +12,7 @@ HAS_IMAGING_DEPS = all(
 
 if HAS_IMAGING_DEPS:
     import numpy as np
+    import pyvista as pv
     import SimpleITK as sitk
 
     from pedicle_planning.ai.candidates import (
@@ -19,8 +20,11 @@ if HAS_IMAGING_DEPS:
         CandidateGridConfig,
         adjust_plan,
         diameter_within_isthmus,
+        entry_on_bone_surface,
         generate_candidates,
         optimize_screw_plan,
+        resolve_pivot_point,
+        snap_entry_to_surface,
     )
     from pedicle_planning.ai.pedicle import IsthmusDetectionConfig, detect_pedicle_isthmus
     from pedicle_planning.ai.trajectory import ScrewPlan
@@ -99,6 +103,50 @@ class CandidateGenerationTests(unittest.TestCase):
         self.assertEqual(len(candidates), 1 + 3 * 3 * 2 - 1)
         with self.assertRaises(ValueError):
             CandidateGridConfig(MEDIAL_ANGLES_DEG=(95.0,)).validate()
+        with self.assertRaises(ValueError):
+            CandidateGridConfig(PIVOT="tip").validate()
+
+    def test_pivot_point_keeps_axis_through_pivot(self):
+        pivot = np.array([13.0, 20.0, 20.0])
+        plan = adjust_plan(self.baseline, self.frame, medial_angle_deg=5.0, pivot_point=pivot)
+        entry, direction = np.asarray(plan.entry), np.asarray(plan.direction)
+        to_pivot = pivot - entry
+        self.assertLess(np.linalg.norm(to_pivot - np.dot(to_pivot, direction) * direction), 1e-9)
+        self.assertAlmostEqual(np.dot(to_pivot, direction), 12.0, places=9)
+        self.assertAlmostEqual(entry[1] - 20.0, -12.0 * math.sin(math.radians(5.0)), places=9)
+        unchanged = adjust_plan(self.baseline, self.frame, pivot_point=pivot)
+        np.testing.assert_allclose(unchanged.entry, self.baseline.entry, atol=1e-12)
+        shifted = adjust_plan(self.baseline, self.frame, medial_offset_mm=1.0, medial_angle_deg=5.0,
+                              pivot_point=pivot)
+        to_shifted_pivot = pivot + np.array([0.0, 1.0, 0.0]) - np.asarray(shifted.entry)
+        d = np.asarray(shifted.direction)
+        self.assertLess(np.linalg.norm(to_shifted_pivot - np.dot(to_shifted_pivot, d) * d), 1e-9)
+
+    def test_isthmus_pivot_requires_pivot_source(self):
+        self.assertIsNone(resolve_pivot_point(self.baseline, "entry"))
+        with self.assertRaises(ValueError):
+            resolve_pivot_point(self.baseline, "isthmus")
+        np.testing.assert_allclose(resolve_pivot_point(self.baseline, "isthmus", pivot_point=(5, 6, 7)), (5, 6, 7))
+        with self.assertRaises(ValueError):
+            generate_candidates(self.baseline, self.frame, CandidateGridConfig(PIVOT="isthmus"))
+
+    def test_snap_status_without_bone_data(self):
+        candidates = generate_candidates(self.baseline, self.frame)
+        self.assertEqual(candidates[0].entry_snap_status, "not_requested")
+        self.assertTrue(all(c.entry_snap_status == "no_bone_data" for c in candidates[1:]))
+        plain = generate_candidates(self.baseline, self.frame, CandidateGridConfig(SNAP_ENTRY=False))
+        self.assertTrue(all(c.entry_snap_status == "not_requested" for c in plain))
+        with self.assertRaises(ValueError):
+            snap_entry_to_surface(self.baseline)
+
+    def test_snap_to_mesh_surface(self):
+        box = pv.Box(bounds=(10.0, 40.0, 10.0, 30.0, 10.0, 30.0)).triangulate()
+        plan = ScrewPlan((7.0, 20.0, 20.0), (1.0, 0.0, 0.0), 20.0, 5.0)
+        snapped, shift = snap_entry_to_surface(plan, bone_mesh=box)
+        self.assertAlmostEqual(snapped.entry[0], 10.0, delta=0.25)
+        self.assertAlmostEqual(shift, 3.0, delta=0.25)
+        np.testing.assert_allclose(np.asarray(snapped.tip) - np.asarray(plan.tip), (shift, 0.0, 0.0), atol=1e-9)
+        self.assertEqual((snapped.length, snapped.diameter), (plan.length, plan.diameter))
 
 
 @unittest.skipUnless(HAS_IMAGING_DEPS, "NumPy, SimpleITK, PyVista, and VTK are required")
@@ -146,6 +194,54 @@ class PedicleAndOptimizationTests(unittest.TestCase):
         self.assertLessEqual(bounds[2], 26.0)  # and ends before the body (x = 26)
         self.assertEqual(bounds[-1], self.baseline.length)
 
+    def test_snap_entry_to_mask_surface(self):
+        # The posterior bone surface of the synthetic vertebra is at x = 0.
+        inside, shift_in = snap_entry_to_surface(self.baseline, bone_mask=self.mask)
+        self.assertAlmostEqual(inside.entry[0], 0.0, delta=0.5)
+        self.assertLess(shift_in, 0.0)
+        outside_plan = ScrewPlan((-3.0, 20.0, 20.0), (1.0, 0.0, 0.0), 45.0, 5.5)
+        outside, shift_out = snap_entry_to_surface(outside_plan, bone_mask=self.mask)
+        self.assertAlmostEqual(outside.entry[0], 0.0, delta=0.5)
+        self.assertAlmostEqual(shift_out, 3.0, delta=0.5)
+        stray = ScrewPlan((1.0, 2.0, 2.0), (1.0, 0.0, 0.0), 45.0, 5.5)
+        self.assertEqual(snap_entry_to_surface(stray, bone_mask=self.mask)[0], None)
+
+    def test_candidates_are_snapped_and_baseline_kept(self):
+        candidates = generate_candidates(self.baseline, self.frame, bone_mask=self.mask)
+        self.assertEqual(candidates[0].plan, self.baseline)
+        self.assertTrue(all(c.entry_snap_status == "snapped" for c in candidates[1:]))
+        for c in candidates[1:]:
+            self.assertAlmostEqual(c.plan.entry[0], 0.0, delta=0.6)
+
+    def test_unreachable_entry_is_rejected(self):
+        grid = CandidateGridConfig(MEDIAL_OFFSETS_MM=(0.0, 30.0), MEDIAL_ANGLES_DEG=(0.0,),
+                                   LENGTH_OFFSETS_MM=(0.0,), DIAMETER_OFFSETS_MM=(0.0,))
+        result = optimize_screw_plan(self.ct, self.baseline, self.frame, lambda f: 0.0,
+                                     bone_mask=self.mask, pedicle=self.pedicle, grid=grid,
+                                     constraints=[entry_on_bone_surface()])
+        far = [e for e in result.evaluations if e.candidate.medial_offset_mm == 30.0]
+        self.assertEqual(len(far), 1)
+        self.assertEqual(far[0].candidate.entry_snap_status, "failed")
+        self.assertFalse(far[0].feasible)
+        self.assertIn("bone surface", far[0].violations[0])
+
+    def test_isthmus_pivot_preserves_isthmus_crossing(self):
+        grid_kwargs = dict(MEDIAL_OFFSETS_MM=(0.0,), MEDIAL_ANGLES_DEG=(-5.0, 5.0),
+                           LENGTH_OFFSETS_MM=(0.0,), DIAMETER_OFFSETS_MM=(0.0,))
+        base_offset = self.pedicle.trajectory_match(self.baseline)["isthmus_offset_mm"]
+        for pivot, expect_preserved in (("isthmus", True), ("entry", False)):
+            candidates = generate_candidates(self.baseline, self.frame, CandidateGridConfig(PIVOT=pivot, **grid_kwargs),
+                                             pedicle=self.pedicle, bone_mask=self.mask)
+            for c in candidates[1:]:
+                self.assertEqual(c.pivot, pivot)
+                offset = self.pedicle.trajectory_match(c.plan)["isthmus_offset_mm"]
+                if expect_preserved:
+                    self.assertAlmostEqual(offset, base_offset, delta=0.2)
+                    # entry moves laterally for a medial tilt, medially for a lateral tilt
+                    self.assertLess(c.plan.entry[1] * np.sign(c.medial_angle_deg), 20.0 * np.sign(c.medial_angle_deg))
+                else:
+                    self.assertGreater(offset, base_offset + 0.8)
+
     def test_detection_fails_outside_bone(self):
         stray = ScrewPlan((1.0, 2.0, 2.0), (1.0, 0.0, 0.0), 45.0, 5.5)
         with self.assertRaises(ValueError):
@@ -180,7 +276,8 @@ class PedicleAndOptimizationTests(unittest.TestCase):
             if abs(evaluation.candidate.medial_offset_mm) == 2.0 and evaluation.candidate.medial_angle_deg == 0.0:
                 self.assertFalse(evaluation.feasible)
         for key in ("medial_offset_mm", "medial_angle_deg", "length_mm", "diameter_mm",
-                    "risk_reduction_relative"):
+                    "risk_reduction_relative", "pivot", "entry_snap_status",
+                    "entry_displacement_medial_mm", "entry_displacement_axial_mm"):
             self.assertIn(key, summary)
         self.assertIn("match_angle_deg", result.best.features)
         self.assertIn("pedicle_core_mean", result.best.features)

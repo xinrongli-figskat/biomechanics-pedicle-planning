@@ -19,7 +19,7 @@ mesh transition algorithms, and Abaqus C3D4 export.
 - Screw-trajectory sampling and segment-wise bone-density (HU/BMD) features
 - Pedicle isthmus detection and constrained, risk-based screw-plan candidate search
 - Tetrahedral transition and Abaqus export utilities
-- 45 synthetic tests with GitHub Actions CI
+- 53 synthetic tests with GitHub Actions CI
 - No real patient data or patient-derived geometry
 ## Overview
 
@@ -84,7 +84,7 @@ The repository exposes the individual computational components above. It is not 
 
 ## Testing
 
-The current test suite contains 45 synthetic tests. They cover:
+The current test suite contains 53 synthetic tests. They cover:
 
 - HU preprocessing
 - Coordinate conversion and round trips

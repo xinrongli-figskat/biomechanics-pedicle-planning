@@ -7,6 +7,10 @@ candidates.py
 内倾角、头尾倾角、螺钉长度与直径，生成有限候选集；候选方案先经安全硬约束
 过滤，再逐一重新计算钉道特征并输入风险评估函数，选取预测风险最低的方案。
 
+角度调整的支点可选进钉点（PIVOT="entry"）或基准钉轴穿过椎弓根峡部的点
+（PIVOT="isthmus"）。调整后的进钉点沿新钉轴重新贴回骨表面（SNAP_ENTRY），
+螺钉长度从贴合后的进钉点起算。
+
 风险评估函数由调用方提供（如训练好的松动预测模型），签名为
 risk_fn(features: dict) -> float，其中 features 为
 TrajectoryFeatures.to_flat_dict() 加上可用时的 match_* 轨迹匹配特征。
@@ -23,10 +27,15 @@ import numpy as np
 from .trajectory import (
     ScrewPlan,
     TrajectorySamplingConfig,
+    _bone_membership,
     compute_trajectory_features,
     points_inside_mesh,
     sample_mask_nearest,
 )
+
+
+PIVOT_OPTIONS = ("entry", "isthmus")
+SNAP_STATUSES = ("not_requested", "no_bone_data", "snapped", "failed")
 
 
 @dataclass(frozen=True)
@@ -63,6 +72,15 @@ class CandidateGridConfig:
     默认：进钉点内外平移 -2/-1/0/+1/+2 mm，内倾角 -5/0/+5°，螺钉长度 -5/0/+5 mm，
     直径 +0/+0.5 mm，共 5×3×3×2 = 90 个候选。头尾平移与头尾倾角默认不调整。
     正值含义：MEDIAL_* 向内侧，CRANIAL_* 向头侧；角度为钉尖方向的转动。
+
+    PIVOT 为角度调整的支点："entry" 绕（平移后的）进钉点转动；"isthmus" 绕基准钉轴
+    穿过峡部截面的点转动（需提供 PedicleGeometry 或显式支点），进钉点随角度移动，
+    钉轴始终经过（平移后的）峡部支点。平移量作用于整条钉轴。
+
+    SNAP_ENTRY 为 True 且提供骨掩膜/骨网格时，非基准候选的进钉点沿新钉轴在
+    [-SNAP_SEARCH_BACK_MM, +SNAP_SEARCH_FORWARD_MM] 范围内搜索“骨外→骨内”的
+    表面交点，取离原进钉点最近者；找不到时该候选标记为 failed，
+    由 entry_on_bone_surface 约束剔除。经验方案本身保持不变。
     """
 
     MEDIAL_OFFSETS_MM: tuple = (-2.0, -1.0, 0.0, 1.0, 2.0)
@@ -71,6 +89,11 @@ class CandidateGridConfig:
     CRANIAL_ANGLES_DEG: tuple = (0.0,)
     LENGTH_OFFSETS_MM: tuple = (-5.0, 0.0, 5.0)
     DIAMETER_OFFSETS_MM: tuple = (0.0, 0.5)
+    PIVOT: str = "entry"
+    SNAP_ENTRY: bool = True
+    SNAP_SEARCH_BACK_MM: float = 10.0
+    SNAP_SEARCH_FORWARD_MM: float = 10.0
+    SNAP_STEP_MM: float = 0.25
 
     def validate(self) -> None:
         for name in ("MEDIAL_OFFSETS_MM", "CRANIAL_OFFSETS_MM", "MEDIAL_ANGLES_DEG",
@@ -81,11 +104,23 @@ class CandidateGridConfig:
         for name in ("MEDIAL_ANGLES_DEG", "CRANIAL_ANGLES_DEG"):
             if np.any(np.abs(getattr(self, name)) >= 90.0):
                 raise ValueError(f"{name} must lie strictly within (-90, 90) degrees")
+        if self.PIVOT not in PIVOT_OPTIONS:
+            raise ValueError(f"PIVOT ({self.PIVOT!r}) must be one of {PIVOT_OPTIONS}")
+        for name in ("SNAP_SEARCH_BACK_MM", "SNAP_SEARCH_FORWARD_MM"):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} ({getattr(self, name)}) must be non-negative")
+        if not self.SNAP_STEP_MM > 0:
+            raise ValueError(f"SNAP_STEP_MM ({self.SNAP_STEP_MM}) must be positive")
 
 
 @dataclass(frozen=True)
 class Candidate:
-    """候选方案及其相对经验方案的调整量。"""
+    """
+    候选方案及其相对经验方案的调整量
+
+    entry_snap_status 取值见 SNAP_STATUSES；entry_snap_shift_mm 为贴合骨面时
+    进钉点沿钉轴的移动量（正值向钉尖方向）。
+    """
 
     plan: ScrewPlan
     medial_offset_mm: float = 0.0
@@ -93,6 +128,9 @@ class Candidate:
     medial_angle_deg: float = 0.0
     cranial_angle_deg: float = 0.0
     is_baseline: bool = False
+    pivot: str = "entry"
+    entry_snap_status: str = "not_requested"
+    entry_snap_shift_mm: float = 0.0
 
 
 def _rotate(vector: np.ndarray, axis: np.ndarray, angle_rad: float) -> np.ndarray:
@@ -119,22 +157,33 @@ def _rotate_toward(vector: np.ndarray, pivot: np.ndarray, target: np.ndarray,
 def adjust_plan(baseline: ScrewPlan, frame: AnatomicalFrame, medial_offset_mm: float = 0.0,
                 cranial_offset_mm: float = 0.0, medial_angle_deg: float = 0.0,
                 cranial_angle_deg: float = 0.0, length: float = None,
-                diameter: float = None) -> ScrewPlan:
+                diameter: float = None, pivot_point=None) -> ScrewPlan:
     """
-    对经验方案做一次调整
+    对经验方案做一次调整（纯几何，不贴合骨面）
 
     内倾角绕头尾轴转动（横断面内），头尾倾角绕与钉轴、头尾轴都垂直的轴转动
-    （矢状面内）；进钉点沿 medial/cranial 方向平移，角度以平移后的进钉点为支点。
+    （矢状面内）；整条钉轴沿 medial/cranial 方向平移。
+
+    pivot_point 为 None 时以（平移后的）进钉点为支点；否则以（平移后的）
+    pivot_point 为支点，新钉轴经过该点，进钉点位于新钉轴上、与支点的距离
+    等于基准方案中进钉点到支点在钉轴上的投影距离。
     """
     medial = np.asarray(frame.medial)
     cranial = np.asarray(frame.cranial)
-    direction = np.asarray(baseline.direction)
+    base_direction = np.asarray(baseline.direction)
+    shift = medial_offset_mm * medial + cranial_offset_mm * cranial
 
-    direction = _rotate_toward(direction, cranial, medial, medial_angle_deg)
+    direction = _rotate_toward(base_direction, cranial, medial, medial_angle_deg)
     sagittal_pivot = np.cross(cranial, direction)
     direction = _rotate_toward(direction, sagittal_pivot, cranial, cranial_angle_deg)
 
-    entry = np.asarray(baseline.entry) + medial_offset_mm * medial + cranial_offset_mm * cranial
+    base_entry = np.asarray(baseline.entry)
+    if pivot_point is None:
+        entry = base_entry + shift
+    else:
+        pivot = np.asarray(pivot_point, dtype=np.float64)
+        depth = float(np.dot(pivot - base_entry, base_direction))
+        entry = pivot + shift - depth * direction
     return ScrewPlan(
         tuple(entry),
         tuple(direction),
@@ -143,9 +192,53 @@ def adjust_plan(baseline: ScrewPlan, frame: AnatomicalFrame, medial_offset_mm: f
     )
 
 
+def snap_entry_to_surface(plan: ScrewPlan, bone_mask=None, bone_mesh=None,
+                          search_back_mm: float = 10.0, search_forward_mm: float = 10.0,
+                          step_mm: float = 0.25) -> tuple:
+    """
+    沿钉轴把进钉点移到骨表面
+
+    在进钉点前后 [-search_back_mm, +search_forward_mm] 范围内按 step_mm 采样，
+    找出所有“骨外→骨内”的交点，取离原进钉点最近者；方向、长度、直径不变，
+    钉尖随进钉点一起移动。
+
+    Returns
+    -------
+    tuple
+        (贴合后的 ScrewPlan, 沿钉轴移动量)；找不到交点时为 (None, nan)
+    """
+    if bone_mask is None and bone_mesh is None:
+        raise ValueError("bone_mask or bone_mesh is required to snap the entry point")
+    direction = np.asarray(plan.direction)
+    s = np.arange(-search_back_mm, search_forward_mm + 1e-9, step_mm)
+    points = np.asarray(plan.entry) + np.outer(s, direction)
+    inside = _bone_membership(points, bone_mask, bone_mesh)
+    crossings = np.flatnonzero(~inside[:-1] & inside[1:])
+    if crossings.size == 0:
+        return None, float("nan")
+    crossing_s = 0.5 * (s[crossings] + s[crossings + 1])
+    shift = float(crossing_s[np.argmin(np.abs(crossing_s))])
+    entry = np.asarray(plan.entry) + shift * direction
+    return ScrewPlan(tuple(entry), plan.direction, plan.length, plan.diameter), shift
+
+
+def resolve_pivot_point(baseline: ScrewPlan, pivot: str, pedicle=None, pivot_point=None):
+    """返回角度调整的支点坐标；PIVOT="entry" 时返回 None。"""
+    if pivot not in PIVOT_OPTIONS:
+        raise ValueError(f"pivot ({pivot!r}) must be one of {PIVOT_OPTIONS}")
+    if pivot == "entry":
+        return None
+    if pivot_point is not None:
+        return np.asarray(pivot_point, dtype=np.float64)
+    if pedicle is None:
+        raise ValueError('PIVOT="isthmus" requires a PedicleGeometry or an explicit pivot_point')
+    return np.asarray(pedicle.isthmus_crossing(baseline), dtype=np.float64)
+
+
 def generate_candidates(baseline: ScrewPlan, frame: AnatomicalFrame,
                         config: CandidateGridConfig = None, lengths: tuple = None,
-                        diameters: tuple = None) -> list:
+                        diameters: tuple = None, pedicle=None, pivot_point=None,
+                        bone_mask=None, bone_mesh=None) -> list:
     """
     生成候选方案列表，第一个元素始终为经验方案本身（is_baseline=True）
 
@@ -153,10 +246,18 @@ def generate_candidates(baseline: ScrewPlan, frame: AnatomicalFrame,
     ----------
     lengths, diameters : tuple, optional
         临床可选规格（绝对值，毫米）；提供时替代 LENGTH/DIAMETER_OFFSETS_MM
+    pedicle : PedicleGeometry, optional
+        PIVOT="isthmus" 时用于确定支点
+    pivot_point : tuple, optional
+        显式指定 PIVOT="isthmus" 的支点（覆盖 pedicle）
+    bone_mask, bone_mesh : optional
+        用于把进钉点贴回骨表面（SNAP_ENTRY）
     """
     if config is None:
         config = CandidateGridConfig()
     config.validate()
+    pivot = resolve_pivot_point(baseline, config.PIVOT, pedicle, pivot_point)
+    has_bone = bone_mask is not None or bone_mesh is not None
 
     if lengths is None:
         lengths = tuple(baseline.length + d for d in config.LENGTH_OFFSETS_MM)
@@ -167,7 +268,7 @@ def generate_candidates(baseline: ScrewPlan, frame: AnatomicalFrame,
     if not lengths or not diameters:
         raise ValueError("at least one positive length and diameter are required")
 
-    candidates = [Candidate(baseline, is_baseline=True)]
+    candidates = [Candidate(baseline, is_baseline=True, pivot=config.PIVOT)]
     for dm in config.MEDIAL_OFFSETS_MM:
         for dc in config.CRANIAL_OFFSETS_MM:
             for am in config.MEDIAL_ANGLES_DEG:
@@ -177,8 +278,21 @@ def generate_candidates(baseline: ScrewPlan, frame: AnatomicalFrame,
                             if (dm == 0 and dc == 0 and am == 0 and ac == 0
                                     and length == baseline.length and diameter == baseline.diameter):
                                 continue
-                            plan = adjust_plan(baseline, frame, dm, dc, am, ac, length, diameter)
-                            candidates.append(Candidate(plan, float(dm), float(dc), float(am), float(ac)))
+                            plan = adjust_plan(baseline, frame, dm, dc, am, ac, length, diameter, pivot)
+                            status, snap_shift = "not_requested", 0.0
+                            if config.SNAP_ENTRY and not has_bone:
+                                status = "no_bone_data"
+                            elif config.SNAP_ENTRY:
+                                snapped, snap_shift = snap_entry_to_surface(
+                                    plan, bone_mask, bone_mesh, config.SNAP_SEARCH_BACK_MM,
+                                    config.SNAP_SEARCH_FORWARD_MM, config.SNAP_STEP_MM)
+                                if snapped is None:
+                                    status = "failed"
+                                else:
+                                    status, plan = "snapped", snapped
+                            candidates.append(Candidate(plan, float(dm), float(dc), float(am), float(ac),
+                                                        pivot=config.PIVOT, entry_snap_status=status,
+                                                        entry_snap_shift_mm=snap_shift))
     return candidates
 
 
@@ -236,6 +350,15 @@ def tip_inside_bone(margin_mm: float = 2.0, n_directions: int = 26):
     return check
 
 
+def entry_on_bone_surface():
+    """进钉点必须能沿钉轴贴合到骨表面（SNAP_ENTRY 搜索失败的候选剔除）。"""
+    def check(candidate, features, ctx):
+        if candidate.entry_snap_status == "failed":
+            return "entry point could not be placed on the bone surface along the screw axis"
+        return None
+    return check
+
+
 def _sphere_directions(n: int) -> np.ndarray:
     """近似均匀的单位方向（Fibonacci 球面）。"""
     k = np.arange(n) + 0.5
@@ -246,7 +369,8 @@ def _sphere_directions(n: int) -> np.ndarray:
 
 def default_constraints() -> list:
     """内置约束；缺少所需数据（峡部几何/骨掩膜）的约束自动跳过。"""
-    return [diameter_within_isthmus(1.0), isthmus_wall_clearance(0.0), tip_inside_bone(2.0)]
+    return [entry_on_bone_surface(), diameter_within_isthmus(1.0), isthmus_wall_clearance(0.0),
+            tip_inside_bone(2.0)]
 
 
 @dataclass
@@ -265,6 +389,7 @@ class OptimizationResult:
     baseline: CandidateEvaluation
     best: CandidateEvaluation
     evaluations: list = field(default_factory=list)
+    frame: AnatomicalFrame = None
 
     @property
     def n_candidates(self) -> int:
@@ -294,6 +419,7 @@ class OptimizationResult:
             "risk_reduction_relative": ((baseline_risk - best.risk) / baseline_risk
                                         if np.isfinite(baseline_risk) and baseline_risk != 0.0
                                         else float("nan")),
+            "pivot": c.pivot,
             "medial_offset_mm": c.medial_offset_mm,
             "cranial_offset_mm": c.cranial_offset_mm,
             "medial_angle_deg": c.medial_angle_deg,
@@ -302,8 +428,26 @@ class OptimizationResult:
             "diameter_mm": c.plan.diameter,
             "entry": c.plan.entry,
             "direction": c.plan.direction,
+            "entry_snap_status": c.entry_snap_status,
+            "entry_snap_shift_mm": c.entry_snap_shift_mm,
         })
+        result.update(entry_displacement(self.baseline.candidate.plan, c.plan, self.frame))
         return result
+
+
+def entry_displacement(baseline: ScrewPlan, plan: ScrewPlan, frame: AnatomicalFrame = None) -> dict:
+    """
+    最终进钉点相对经验进钉点的实际位移（含支点转动与贴合骨面带来的移动）
+
+    分解到内侧、头侧和基准钉轴方向；未提供 frame 时只给出总位移。
+    """
+    delta = np.asarray(plan.entry) - np.asarray(baseline.entry)
+    result = {"entry_displacement_mm": float(np.linalg.norm(delta))}
+    if frame is not None:
+        result["entry_displacement_medial_mm"] = float(np.dot(delta, frame.medial))
+        result["entry_displacement_cranial_mm"] = float(np.dot(delta, frame.cranial))
+        result["entry_displacement_axial_mm"] = float(np.dot(delta, baseline.direction))
+    return result
 
 
 def candidate_features(image, candidate: Candidate, ctx: ConstraintContext,
@@ -324,7 +468,8 @@ def optimize_screw_plan(image, baseline: ScrewPlan, frame: AnatomicalFrame, risk
                         bone_mask=None, bone_mesh=None, pedicle=None, constraints: list = None,
                         grid: CandidateGridConfig = None, lengths: tuple = None,
                         diameters: tuple = None, calibration=None,
-                        sampling_config: TrajectorySamplingConfig = None) -> OptimizationResult:
+                        sampling_config: TrajectorySamplingConfig = None,
+                        pivot_point=None) -> OptimizationResult:
     """
     在安全约束下搜索预测松动风险最低的置钉方案
 
@@ -343,13 +488,19 @@ def optimize_screw_plan(image, baseline: ScrewPlan, frame: AnatomicalFrame, risk
     constraints : list, optional
         约束函数 f(candidate, features, ctx) -> None 或违规说明字符串；
         默认 default_constraints()
+    grid : CandidateGridConfig, optional
+        候选网格，含支点（PIVOT）与进钉点贴合骨面（SNAP_ENTRY）设置
+    pivot_point : tuple, optional
+        PIVOT="isthmus" 时显式指定支点（默认取基准钉轴与峡部截面的交点）
     """
     if constraints is None:
         constraints = default_constraints()
     ctx = ConstraintContext(image=image, bone_mask=bone_mask, bone_mesh=bone_mesh, pedicle=pedicle)
 
     evaluations = []
-    for candidate in generate_candidates(baseline, frame, grid, lengths, diameters):
+    candidates = generate_candidates(baseline, frame, grid, lengths, diameters, pedicle=pedicle,
+                                     pivot_point=pivot_point, bone_mask=bone_mask, bone_mesh=bone_mesh)
+    for candidate in candidates:
         features = candidate_features(image, candidate, ctx, calibration, sampling_config)
         violations = [msg for msg in (check(candidate, features, ctx) for check in constraints) if msg]
         feasible = not violations
@@ -358,4 +509,4 @@ def optimize_screw_plan(image, baseline: ScrewPlan, frame: AnatomicalFrame, risk
 
     feasible = [e for e in evaluations if e.feasible and np.isfinite(e.risk)]
     best = min(feasible, key=lambda e: e.risk) if feasible else None
-    return OptimizationResult(baseline=evaluations[0], best=best, evaluations=evaluations)
+    return OptimizationResult(baseline=evaluations[0], best=best, evaluations=evaluations, frame=frame)
