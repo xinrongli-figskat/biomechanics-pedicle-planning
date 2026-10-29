@@ -53,6 +53,8 @@ results/
 output/
 outputs/
 artifacts/
+cases/
+case_output/
 
 # Runtime / binaries
 runtime/

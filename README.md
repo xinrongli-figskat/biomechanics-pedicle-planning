@@ -21,7 +21,7 @@ mesh transition algorithms, and Abaqus C3D4 export.
 - Automatic per-vertebra anatomical frame from a vertebra mask
 - Directional (medial/lateral, cranial/caudal) interface features and whole vertebral-body BMD
 - Tetrahedral transition and Abaqus export utilities
-- 74 synthetic tests with GitHub Actions CI
+- 79 synthetic tests with GitHub Actions CI
 - No real patient data or patient-derived geometry
 ## Overview
 
@@ -86,7 +86,7 @@ The repository exposes the individual computational components above. It is not 
 
 ## Testing
 
-The current test suite contains 74 synthetic tests. They cover:
+The current test suite contains 79 synthetic tests. They cover:
 
 - HU preprocessing
 - Coordinate conversion and round trips
@@ -123,6 +123,10 @@ python examples/synthetic/run_planning_demo.py
 The optimizer does not expose per-iteration history. The following plot therefore shows the running best heuristic score by score-evaluation index, recorded only by the demo wrapper without changing optimizer behavior.
 
 ![Synthetic optimization progress](docs/images/optimization_progress.png)
+
+## Running a Local Case
+
+`examples/clinical/run_case_pipeline.py` runs the trajectory-feature and candidate-planning pipeline on a CT, a vertebra mask, and baseline screw coordinates stored on your own machine, and writes a JSON summary, candidate tables, and QC figures. See [examples/clinical/README.md](examples/clinical/README.md) for input formats and data-handling notes. Its test runs it end to end on a synthetic vertebra.
 
 ## Installation
 
