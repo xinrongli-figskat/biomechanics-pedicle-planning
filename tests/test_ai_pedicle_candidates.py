@@ -175,6 +175,12 @@ class PedicleAndOptimizationTests(unittest.TestCase):
         self.assertAlmostEqual(ped.outer_height, 2 * 1.4 * ISTHMUS_HALF_WIDTH, delta=1.0)
 
     def test_pedicle_axis_recovers_tilt(self):
+        self.assertEqual(self.pedicle.axis_status, "fitted")
+        self.assertAlmostEqual(self.pedicle.axis_fit_tilt_deg, PEDICLE_TILT_DEG, delta=1.5)
+        in_pedicle = [row for row in self.pedicle.profile if row["in_pedicle"]]
+        self.assertGreaterEqual(len(in_pedicle), 4)
+        for row in in_pedicle:
+            self.assertAlmostEqual(row["width_mm"], row["medial_mm"] + row["lateral_mm"], delta=1.0)
         match = self.pedicle.trajectory_match(self.baseline)
         self.assertAlmostEqual(match["angle_deg"], PEDICLE_TILT_DEG, delta=1.5)
         self.assertGreater(self.pedicle.axis[1], 0.0)

@@ -243,9 +243,11 @@ class PedicleGeometry:
     """
     椎弓根几何
 
-    isthmus 为峡部射线截面；axis 为拟合的椎弓根轴线方向（与基准螺钉同向）；
+    isthmus 为峡部射线截面；axis 为拟合的椎弓根轴线方向（与基准螺钉同向），
+    axis_status / axis_fit_tilt_deg 说明拟合是否被采用（见 _fit_axis）；
     section_normal 为椎弓根段起止平面的法向（基准钉轴方向），start_point/end_point
-    为起止平面上的点；profile 记录各截面 (t, 横径, 高度, 横径是否闭合)。
+    为起止平面上的点；profile 为各截面的诊断字典（t、横径、高度、四个方向的
+    外壁距离、是否属于椎弓根段，未闭合为 inf）。
     """
 
     isthmus: RaySection
@@ -258,6 +260,8 @@ class PedicleGeometry:
     frame: object = None
     config: IsthmusDetectionConfig = None
     profile: list = field(default_factory=list)
+    axis_status: str = "fitted"
+    axis_fit_tilt_deg: float = float("nan")
 
     @property
     def isthmus_point(self) -> np.ndarray:
@@ -392,25 +396,32 @@ def _theil_sen_slope(x: np.ndarray, y: np.ndarray) -> float:
     return float(np.median((y[j] - y[i])[valid] / dx[valid])) if np.any(valid) else 0.0
 
 
-def _fit_axis(sections, direction: np.ndarray, min_sections: int, max_angle_deg: float) -> np.ndarray:
+def _fit_axis(sections, direction: np.ndarray, min_sections: int, max_angle_deg: float) -> tuple:
     """
     椎弓根轴：各截面中点相对钉轴的内外、头尾偏移对轴向位置 t 做 Theil–Sen 回归，
     用斜率修正钉轴方向。截面过少或斜率超过 max_angle_deg 时返回钉轴方向。
 
     （短区间内的中点云做主成分分析对噪声很敏感，回归只把误差放在偏移上。）
+
+    Returns
+    -------
+    tuple
+        (axis, status, fitted_tilt_deg)；status 为 "fitted"、"too_few_sections" 或
+        "tilt_above_limit"，fitted_tilt_deg 为回归得到的倾角（被拒绝时也给出）。
     """
     direction = np.asarray(direction, dtype=np.float64)
     if len(sections) < min_sections:
-        return direction
+        return direction, "too_few_sections", float("nan")
     t = np.array([s.t for s in sections])
     offsets = np.array([s.chord_center - s.center for s in sections])
     medial, cranial = sections[0].medial, sections[0].cranial
     slope_m = _theil_sen_slope(t, offsets @ medial)
     slope_c = _theil_sen_slope(t, offsets @ cranial)
-    if np.degrees(np.arctan(np.hypot(slope_m, slope_c))) > max_angle_deg:
-        return direction
+    tilt = float(np.degrees(np.arctan(np.hypot(slope_m, slope_c))))
+    if tilt > max_angle_deg:
+        return direction, "tilt_above_limit", tilt
     axis = direction + slope_m * medial + slope_c * cranial
-    return axis / np.linalg.norm(axis)
+    return axis / np.linalg.norm(axis), "fitted", tilt
 
 
 def detect_pedicle_isthmus(bone_mask: sitk.Image, plan: ScrewPlan, image: sitk.Image = None,
@@ -457,13 +468,20 @@ def detect_pedicle_isthmus(bone_mask: sitk.Image, plan: ScrewPlan, image: sitk.I
     while hi + 1 < len(sections) and widths[hi + 1] <= limit:
         hi += 1
 
-    axis = _fit_axis(sections[lo:hi + 1], direction, config.MIN_AXIS_SECTIONS, config.MAX_AXIS_ANGLE_DEG)
+    axis, axis_status, axis_tilt = _fit_axis(sections[lo:hi + 1], direction, config.MIN_AXIS_SECTIONS,
+                                             config.MAX_AXIS_ANGLE_DEG)
     half_step = 0.5 * config.AXIAL_STEP
     start_point = entry + (t_values[lo] - half_step) * direction
     end_point = entry + (t_values[hi] + half_step) * direction
-    profile = [(float(s.t), s.width("outer") if s.ml_bounded else float("inf"),
-                s.height("outer") if s.center_in_bone else float("inf"), bool(s.ml_bounded))
-               for s in sections]
+    profile = [{
+        "t_mm": float(s.t),
+        "width_mm": s.width("outer") if s.ml_bounded else float("inf"),
+        "height_mm": s.height("outer") if s.center_in_bone else float("inf"),
+        "medial_mm": s.distance(0.0), "lateral_mm": s.distance(180.0),
+        "cranial_mm": s.distance(90.0), "caudal_mm": s.distance(270.0),
+        "center_in_bone": bool(s.center_in_bone),
+        "in_pedicle": bool(lo <= i <= hi),
+    } for i, s in enumerate(sections)]
 
     isthmus = sections[idx]
     if config.REFINE and np.degrees(np.arccos(np.clip(np.dot(axis, direction), -1.0, 1.0))) > 1.0:
@@ -488,4 +506,6 @@ def detect_pedicle_isthmus(bone_mask: sitk.Image, plan: ScrewPlan, image: sitk.I
         frame=frame,
         config=config,
         profile=profile,
+        axis_status=axis_status,
+        axis_fit_tilt_deg=axis_tilt,
     )

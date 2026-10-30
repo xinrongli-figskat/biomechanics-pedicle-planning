@@ -240,6 +240,8 @@ def _pedicle_dict(pedicle, plan) -> dict:
     return {
         "isthmus_point": pedicle.isthmus_point,
         "axis": pedicle.axis,
+        "axis_status": pedicle.axis_status,
+        "axis_fit_tilt_deg": pedicle.axis_fit_tilt_deg,
         "outer_width_mm": pedicle.outer_width,
         "outer_height_mm": pedicle.outer_height,
         "inner_width_mm": pedicle.inner_width,
@@ -250,7 +252,7 @@ def _pedicle_dict(pedicle, plan) -> dict:
         "cancellous_hu": isthmus.cancellous_hu,
         "cortex_contrast_hu": isthmus.cortex_contrast_hu,
         "cortex_threshold_hu": isthmus.cortex_threshold_hu,
-        "width_profile": [{"t_mm": t, "width_mm": w, "height_mm": h} for t, w, h, _ in pedicle.profile],
+        "width_profile": pedicle.profile,
         "segment_bounds_mm": pedicle.segment_bounds_for(plan),
         "baseline_match": pedicle.trajectory_match(plan),
     }
