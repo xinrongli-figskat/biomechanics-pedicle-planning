@@ -408,7 +408,14 @@ def process_case(args) -> dict:
             if not args.no_qc:
                 best = result.best.candidate.plan if (result.best is not None and risk_fn is not None) else None
                 focus = pedicle.isthmus_point if pedicle is not None else plan.entry
-                record["qc_figure"] = write_qc_figure(out_dir / f"qc_{sid}.png", ct, mask, plan, best, focus)
+                qc_path = out_dir / f"qc_{sid}.png"
+                try:
+                    record["qc_figure"] = write_qc_figure(qc_path, ct, mask, plan, best, focus)
+                except OSError as exc:  # e.g. the old figure is open in a viewer on Windows
+                    record["qc_figure"] = False
+                    record["qc_error"] = f"{type(exc).__name__}: {exc}"
+                    print(f"[warn] screw {sid}: QC figure not written ({exc}); close any program showing "
+                          f"{qc_path.name} and rerun, or use another --out folder", file=sys.stderr)
         except Exception as exc:  # keep processing the other screws
             record["error"] = f"{type(exc).__name__}: {exc}"
             record["traceback"] = traceback.format_exc()

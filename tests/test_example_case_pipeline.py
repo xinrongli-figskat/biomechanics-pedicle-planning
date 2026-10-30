@@ -125,6 +125,24 @@ class CasePipelineScriptTests(unittest.TestCase):
         self.assertGreater(opt["n_feasible"], 0)
         self.assertEqual(summary["options"]["risk"], "none")
 
+    def test_qc_write_failure_does_not_fail_the_screw(self):
+        original = self.script.write_qc_figure
+
+        def locked(*args, **kwargs):
+            raise OSError(22, "Invalid argument")
+
+        self.script.write_qc_figure = locked
+        try:
+            code, summary = self._run("out_locked", "screws_lps.csv", "--risk", "demo")
+        finally:
+            self.script.write_qc_figure = original
+        if HAS_MATPLOTLIB:
+            self.assertEqual(code, 0)
+            record = summary["screws"]["L_left"]
+            self.assertNotIn("error", record)
+            self.assertFalse(record["qc_figure"])
+            self.assertIn("qc_error", record)
+
     def test_bad_inputs(self):
         with self.assertRaises(ValueError):
             self.script.binary_mask(sitk.Image(5, 5, 5, sitk.sitkUInt8), 3)
