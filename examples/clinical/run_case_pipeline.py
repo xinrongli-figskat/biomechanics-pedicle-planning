@@ -236,14 +236,21 @@ def _frame_dict(vframe) -> dict:
 
 
 def _pedicle_dict(pedicle, plan) -> dict:
+    isthmus = pedicle.isthmus
     return {
         "isthmus_point": pedicle.isthmus_point,
-        "inner_dominance": pedicle.isthmus.inner_dominance,
         "axis": pedicle.axis,
+        "outer_width_mm": pedicle.outer_width,
+        "outer_height_mm": pedicle.outer_height,
+        "inner_width_mm": pedicle.inner_width,
+        "inner_height_mm": pedicle.inner_height,
         "outer_min_width_mm": pedicle.outer_min_width,
         "inner_min_width_mm": pedicle.inner_min_width,
-        "isthmus_area_outer_mm2": pedicle.isthmus.area_outer,
-        "isthmus_area_inner_mm2": pedicle.isthmus.area_inner,
+        "cortex_resolved": isthmus.cortex_resolved,
+        "cancellous_hu": isthmus.cancellous_hu,
+        "cortex_contrast_hu": isthmus.cortex_contrast_hu,
+        "cortex_threshold_hu": isthmus.cortex_threshold_hu,
+        "width_profile": [{"t_mm": t, "width_mm": w, "height_mm": h} for t, w, h, _ in pedicle.profile],
         "segment_bounds_mm": pedicle.segment_bounds_for(plan),
         "baseline_match": pedicle.trajectory_match(plan),
     }
@@ -378,7 +385,7 @@ def process_case(args) -> dict:
         try:
             frame = vframe.anatomical_frame_for(plan.entry)
             try:
-                pedicle = detect_pedicle_isthmus(mask, plan, image=ct)
+                pedicle = detect_pedicle_isthmus(mask, plan, image=ct, frame=frame)
                 record["pedicle"] = _pedicle_dict(pedicle, plan)
             except ValueError as exc:
                 pedicle = None

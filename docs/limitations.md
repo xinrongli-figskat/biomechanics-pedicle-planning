@@ -24,7 +24,7 @@ No real patient DICOM or NIfTI images, STL anatomy, patient metadata, or patient
 - Local optimization does not guarantee a global optimum.
 - Score weights and search parameters are retained from the current implementation and are not presented as universally valid or clinically optimal.
 - Geometric safety calculations depend on the correctness and resolution of caller-provided meshes and metadata.
-- Pedicle isthmus detection assumes the baseline screw passes through the pedicle and that a vertebra mask is available; it is verified only on a synthetic vertebra.
+- Pedicle isthmus detection assumes the baseline screw passes through the pedicle and that a vertebra mask is available. It is verified on synthetic vertebrae; on one clinical CT the earlier area-based version failed (see the commit history), and the ray-based version has not yet been compared with manual measurements. Inner (endosteal) width depends on how well the CT resolves the pedicle cortex.
 - The per-vertebra frame assumes approximate bilateral symmetry of a single-vertebra mask; it is verified only on a synthetic vertebra, and its reliability threshold is not calibrated on real segmentations.
 - Whole vertebral-body density uses a fixed anterior fraction of the vertebra as the body and a fixed erosion margin; it is not validated against manual clinical ROIs or QCT.
 - Built-in candidate safety constraints cover only isthmus diameter, pedicle-wall clearance at the isthmus, and tip margin; spinal-canal, nerve-root, endplate, and facet constraints are not implemented.

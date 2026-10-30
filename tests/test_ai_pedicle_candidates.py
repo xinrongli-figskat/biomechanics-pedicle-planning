@@ -28,6 +28,7 @@ if HAS_IMAGING_DEPS:
     )
     from pedicle_planning.ai.pedicle import IsthmusDetectionConfig, detect_pedicle_isthmus
     from pedicle_planning.ai.trajectory import ScrewPlan
+    from pedicle_planning.ai.vertebra_frame import estimate_vertebra_frame
 
     from synthetic_vertebra import CENTER, synthetic_vertebra_ct
 
@@ -158,7 +159,7 @@ class PedicleAndOptimizationTests(unittest.TestCase):
         cls.ct, cls.mask = _synthetic_vertebra()
         cls.frame = AnatomicalFrame(medial=(0.0, 1.0, 0.0), cranial=(0.0, 0.0, 1.0))
         cls.baseline = ScrewPlan((1.0, 20.0, 20.0), (1.0, 0.0, 0.0), 45.0, 5.5)
-        cls.pedicle = detect_pedicle_isthmus(cls.mask, cls.baseline, image=cls.ct)
+        cls.pedicle = detect_pedicle_isthmus(cls.mask, cls.baseline, image=cls.ct, frame=cls.frame)
 
     def test_isthmus_location_and_widths(self):
         ped = self.pedicle
@@ -168,7 +169,10 @@ class PedicleAndOptimizationTests(unittest.TestCase):
         expected_outer = 2 * ISTHMUS_HALF_WIDTH * math.cos(math.radians(PEDICLE_TILT_DEG))
         self.assertAlmostEqual(ped.outer_min_width, expected_outer, delta=0.6)
         self.assertAlmostEqual(ped.inner_min_width, expected_outer - 2 * CORTEX_MM, delta=0.6)
-        self.assertLess(ped.isthmus.area_inner, ped.isthmus.area_outer)
+        self.assertLess(ped.isthmus.area("inner"), ped.isthmus.area("outer"))
+        self.assertTrue(ped.isthmus.cortex_resolved)
+        # vertical (cranio-caudal) half-axis is 1.4x the transverse one
+        self.assertAlmostEqual(ped.outer_height, 2 * 1.4 * ISTHMUS_HALF_WIDTH, delta=1.0)
 
     def test_pedicle_axis_recovers_tilt(self):
         match = self.pedicle.trajectory_match(self.baseline)
@@ -183,7 +187,13 @@ class PedicleAndOptimizationTests(unittest.TestCase):
 
     def test_wall_clearance_detects_breach(self):
         shifted = adjust_plan(self.baseline, self.frame, medial_offset_mm=3.0)
-        self.assertLess(self.pedicle.trajectory_match(shifted)["outer_clearance_mm"], 0.0)
+        match = self.pedicle.trajectory_match(shifted)
+        self.assertLess(match["outer_clearance_mm"], 0.0)
+        self.assertLess(match["medial_clearance_mm"], 0.0)
+        self.assertGreater(match["lateral_clearance_mm"], 2.0)
+        lateral = self.pedicle.trajectory_match(adjust_plan(self.baseline, self.frame, medial_offset_mm=-3.0))
+        self.assertLess(lateral["lateral_clearance_mm"], 0.0)
+        self.assertGreater(lateral["medial_clearance_mm"], 2.0)
 
     def test_segment_bounds_follow_anatomy(self):
         bounds = self.pedicle.segment_bounds_for(self.baseline)
@@ -319,24 +329,44 @@ class PedicleAndOptimizationTests(unittest.TestCase):
 
 @unittest.skipUnless(HAS_IMAGING_DEPS, "NumPy, SimpleITK, PyVista, and VTK are required")
 class IsthmusRobustnessTests(unittest.TestCase):
-    """Regression: on the rotated full-vertebra phantom the isthmus must stay inside the pedicle
-    (local anterior coordinate -14..-2) instead of slipping to the pedicle-body junction, where the
-    section crosses the posterior body wall and splits the cancellous channel."""
+    """Regression for the full-vertebra phantom, whose pedicles merge with transverse processes and the
+    body: the first real case showed area-based detection reporting a 15.5 mm "isthmus" with inner width
+    equal to outer width and a 41-degree pedicle axis. Ray measurements must stay inside the pedicle,
+    give a plausible transverse width, resolve the cortex, and keep the axis close to the true one."""
 
     def test_isthmus_stays_in_pedicle_for_rotated_vertebrae(self):
+        # true pedicle axis is the local anterior axis; the screw converges 5 mm over 40 mm (7.1 degrees)
+        expected_angle = math.degrees(math.atan2(5.0, 40.0))
         for rotation in (15.0, -20.0):
             ct, mask, axes = synthetic_vertebra_ct(rotation, 0.0, 0.0)
+            vframe = estimate_vertebra_frame(mask)
             for side in (1.0, -1.0):
                 with self.subTest(rotation=rotation, side=side):
                     entry = np.asarray(CENTER) + axes @ np.array([13.0 * side, -22.0, 0.0])
                     tip = np.asarray(CENTER) + axes @ np.array([8.0 * side, 18.0, 0.0])
-                    ped = detect_pedicle_isthmus(mask, ScrewPlan.from_entry_tip(entry, tip, 3.0), image=ct)
+                    plan = ScrewPlan.from_entry_tip(entry, tip, 3.0)
+                    ped = detect_pedicle_isthmus(mask, plan, image=ct, frame=vframe.anatomical_frame_for(entry))
                     local = (ped.isthmus_point - np.asarray(CENTER)) @ axes
                     self.assertGreater(local[1], -10.0)
-                    self.assertLess(local[1], -3.0)
-                    self.assertGreaterEqual(ped.isthmus.inner_dominance, 0.7)
-                    self.assertGreater(ped.inner_min_width, 4.5)
-                    self.assertGreater(ped.outer_min_width, 7.0)
+                    self.assertLess(local[1], -2.0)
+                    self.assertAlmostEqual(abs(local[0]), 12.0, delta=1.0)  # pedicle centre line
+                    self.assertGreater(ped.outer_width, 7.5)
+                    self.assertLess(ped.outer_width, 10.5)
+                    self.assertTrue(ped.isthmus.cortex_resolved)
+                    self.assertLess(ped.inner_width, ped.outer_width - 1.0)
+                    self.assertGreater(ped.inner_width, 4.5)
+                    self.assertLess(abs(ped.trajectory_match(plan)["angle_deg"] - expected_angle), 7.0)
+
+    def test_unresolved_cortex_is_reported(self):
+        ct, mask, axes = synthetic_vertebra_ct(0.0, 0.0, 0.0)
+        flat = sitk.Cast(mask, sitk.sitkFloat32) * 300.0  # bone without a cortical shell
+        entry = np.asarray(CENTER) + axes @ np.array([13.0, -22.0, 0.0])
+        tip = np.asarray(CENTER) + axes @ np.array([8.0, 18.0, 0.0])
+        plan = ScrewPlan.from_entry_tip(entry, tip, 3.0)
+        ped = detect_pedicle_isthmus(mask, plan, image=flat, frame=AnatomicalFrame((-1.0, 0.0, 0.0), (0.0, 0.0, 1.0)))
+        self.assertFalse(ped.isthmus.cortex_resolved)
+        self.assertEqual(ped.inner_width, ped.outer_width)
+        self.assertTrue(math.isnan(ped.trajectory_match(plan)["inner_clearance_mm"]))
 
 
 if __name__ == "__main__":
