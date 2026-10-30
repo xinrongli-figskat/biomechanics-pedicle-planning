@@ -27,6 +27,9 @@ pedicle_planning.ai
 │       └── config
 ├── utils
 │   └── config
+├── baseline (reference screws from a vertebra mask when no surgeon plan exists)
+│   ├── pedicle
+│   └── trajectory
 ├── vertebral_body (whole vertebral-body trabecular bone density)
 │   ├── vertebra_frame
 │   └── trajectory

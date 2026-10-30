@@ -98,13 +98,24 @@ On the synthetic vertebra, axes are recovered within about 1–2° for combined 
 
 The ROI is fully automatic and three-dimensional, so it is not identical to manually placed single-slice clinical ROIs; values should be compared with those only after validation.
 
-## 11. Tetrahedral Transition Algorithms
+## 11. Reference Baseline Screws
+
+`pedicle_planning.ai.baseline.generate_baseline_screws` produces one straight-forward reference trajectory per pedicle when no surgeon's plan is available (e.g. public datasets). It is a reproducible starting point for feature extraction and candidate search, not a surgical plan.
+
+- **Canal.** From the body centre (per-vertebra frame, Section 9) along the midsagittal line backwards: leaving bone marks the posterior body wall, re-entering bone the lamina.
+- **Pedicle centre and isthmus.** Coronal planes every 0.5 mm between the body wall and 2 mm short of the lamina are sampled on each side of the midline; the pedicle centre is the centroid of the near-maximal plateau (≥ 90 %) of the in-plane distance map, i.e. the largest inscribed circle, which thin attachments such as transverse processes do not move. The isthmus is the plane with the smallest inscribed radius.
+- **Direction.** The trajectory passes through the isthmus centre parallel to the endplates (cranial angle 0). The medial angle is searched from −10° to 35° in 1° steps; each candidate line is scored by its minimum ray distance to the bone wall within ±8 mm of the isthmus, and the middle of the contiguous run of angles within 0.25 mm of the best score is taken ("farthest from the cortex"). Fitting the direction to a few pedicle centres was unstable for short pedicles and was dropped.
+- **Entry, length, diameter.** The entry is where the line, followed backwards from the isthmus, leaves bone (≥ 2.5 mm outside, so small segmentation gaps are crossed); the in-bone length runs to the anterior cortex likewise. Length is the largest catalogue size (30–55 mm) ≤ 80 % of the in-bone length and ≤ in-bone length − 3 mm; diameter the largest catalogue size (4.0–7.5 mm) ≤ 80 % of the isthmus width (twice the inscribed radius).
+
+On the synthetic vertebra the isthmus centre is found within 1 mm and every reference screw stays inside the pedicle; because that pedicle is short and wide, angles across roughly −10° to 15° are equally safe and the chosen medial angle varies within that cone.
+
+## 12. Tetrahedral Transition Algorithms
 
 The FEA package contains transition templates for tetrahedral refinement and utilities that validate generated tetrahedra. Validation checks include element volume and orientation, duplicate elements, non-manifold faces, interface signatures, and elementary mesh-quality measures.
 
 Additional helpers group green-transition faces and triangulate shared interfaces consistently. The templates represent computational mesh preprocessing; they are not a complete adaptive meshing system or a claim of solver accuracy.
 
-## 12. Abaqus Export
+## 13. Abaqus Export
 
 The export layer writes nodes and four-node tetrahedral elements as Abaqus C3D4 part definitions and assembles generated parts into an Abaqus input structure. It can parse the relevant mesh text used by the writer and reports basic counts and status.
 

@@ -240,7 +240,10 @@ def measure_section(bone_mask: sitk.Image, center, normal, t: float = 0.0, image
                     resolved = True
                     threshold = cancellous + 0.5 * contrast
                     for i in np.flatnonzero(bounded):
-                        window = np.flatnonzero((radii >= outer[i] - config.CORTEX_SEARCH_MM) & (radii <= outer[i]))
+                        # the inner wall lies in the outer half of the ray: a narrow pedicle must not
+                        # let the search window reach the axis point
+                        inner_start = max(outer[i] - config.CORTEX_SEARCH_MM, 0.5 * outer[i])
+                        window = np.flatnonzero((radii >= inner_start) & (radii <= outer[i]))
                         above = window[hu[i, window] >= threshold]
                         inner[i] = float(radii[above[0]]) if above.size else outer[i]
 
@@ -373,7 +376,8 @@ class PedicleGeometry:
             "inner_clearance_mm": clear["inner"],
             "medial_clearance_mm": clear["medial"],
             "lateral_clearance_mm": clear["lateral"],
-            "diameter_ratio": float(plan.diameter / self.inner_min_width),
+            "diameter_ratio": (float(plan.diameter / self.inner_min_width) if self.inner_min_width > 0
+                               else float("nan")),
             "isthmus_t_mm": self.axis_plane_t(plan, self.isthmus.center, self.isthmus.normal),
         }
 

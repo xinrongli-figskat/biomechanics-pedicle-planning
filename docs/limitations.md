@@ -27,6 +27,7 @@ No real patient DICOM or NIfTI images, STL anatomy, patient metadata, or patient
 - Pedicle isthmus detection assumes the baseline screw passes through the pedicle and that a vertebra mask is available. It is verified on synthetic vertebrae; on one clinical CT the earlier area-based version failed (see the commit history), and the ray-based version has not yet been compared with manual measurements. Inner (endosteal) width depends on how well the CT resolves the pedicle cortex.
 - The per-vertebra frame assumes approximate bilateral symmetry of a single-vertebra mask; it is verified only on a synthetic vertebra, and its reliability threshold is not calibrated on real segmentations.
 - Whole vertebral-body density uses a fixed anterior fraction of the vertebra as the body and a fixed erosion margin; it is not validated against manual clinical ROIs or QCT.
+- Reference baseline screws are geometric constructions (isthmus centre, endplate-parallel, farthest from the wall), verified only on a synthetic vertebra; they are not surgical plans and are not compared with surgeons' trajectories.
 - Built-in candidate safety constraints cover only isthmus diameter, pedicle-wall clearance at the isthmus, and tip margin; spinal-canal, nerve-root, endplate, and facet constraints are not implemented.
 
 ## No Trained ML Model

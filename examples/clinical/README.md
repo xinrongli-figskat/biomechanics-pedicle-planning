@@ -38,6 +38,16 @@ python examples/clinical/prepare_from_meshes.py --ct cases/case01/ct.nii --bone-
 - Each screw's axis comes from the mesh shape. The radius profile along the axis identifies a wider end segment (screw head / tulip), which is excluded: `length_mm` and `diameter_mm` describe the threaded shank and the entry is the shank end next to the head. Without a head, the entry is the end with less bone around it. The label is the vertebra the axis runs through.
 - Outputs (`vertebrae_from_mesh.nii.gz`, `screws_from_mesh.csv` with a `label` column, `prepare_report.json`) use neutral names (`screw1`, `label 1`), never input file names. Pass them to `run_case_pipeline.py` with `--mask` and `--screws` (LPS, the default).
 
+## Data without a surgeon's plan (e.g. public datasets)
+
+When only CT and vertebra segmentations are available (e.g. VerSe, CTSpine1K), generate reference screws first:
+
+```bash
+python examples/clinical/make_baseline_screws.py --mask cases/verse01/seg.nii.gz --labels 22 23 24 --out cases/verse01/baseline
+```
+
+This writes `baseline_screws.csv` (LPS, with a `label` column; screws named `<label>_left` / `<label>_right`) and `baseline_report.json` (isthmus width, medial angle, minimum wall distance, in-bone length per screw). Pass the CSV to `run_case_pipeline.py` with the same label map as `--mask`. These are standard straight-forward reference trajectories through the pedicle isthmus, not surgical plans; see `docs/algorithm.md`, section 11.
+
 ## Inputs
 
 | Argument | Content |

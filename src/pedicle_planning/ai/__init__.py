@@ -25,6 +25,7 @@ __all__ = [
     "estimate_vertebra_frame",
     "image_axes_frame",
     "compute_vertebral_body_bmd",
+    "generate_baseline_screws",
 ]
 
 _EXPORT_MODULES = {
@@ -45,6 +46,7 @@ _EXPORT_MODULES = {
     "estimate_vertebra_frame": ".vertebra_frame",
     "image_axes_frame": ".vertebra_frame",
     "compute_vertebral_body_bmd": ".vertebral_body",
+    "generate_baseline_screws": ".baseline",
 }
 
 
