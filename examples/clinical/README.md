@@ -17,6 +17,14 @@ CT + vertebra mask + baseline screw (entry, tip)
 - Use de-identified data, within your ethics approval. Converting DICOM to NIfTI (e.g. `dcm2niix`) drops most header metadata.
 - The script records image geometry and options in `case_summary.json`, but **not** input paths or DICOM header fields.
 
+## Check the inputs first
+
+```bash
+python examples/clinical/inspect_inputs.py --ct cases/case01/ct.nii --mask cases/case01/seg/vertebrae_L4.nii.gz
+```
+
+This prints size, spacing, orientation, intensity percentiles and mask labels, and warns when the CT does not look like HU (e.g. a converter dropped the DICOM rescale intercept), when slices are thick, or when the mask is not in the same space as the CT. Copy cases to a short path without spaces or non-ASCII characters (e.g. `D:\cases\case01\`), which avoids path problems in SimpleITK and TotalSegmentator on Windows.
+
 ## Inputs
 
 | Argument | Content |
