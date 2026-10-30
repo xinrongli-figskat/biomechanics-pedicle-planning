@@ -69,10 +69,14 @@ KEY_FEATURES = (
     "tip_sphere_mean",
     "whole_interface_low_density_fraction",
     "in_bone_length",
+    "traj_medial_angle_deg",
+    "traj_cranial_angle_deg",
     "match_angle_deg",
     "match_isthmus_offset_mm",
     "match_outer_clearance_mm",
     "match_inner_clearance_mm",
+    "match_medial_clearance_mm",
+    "match_lateral_clearance_mm",
     "match_diameter_ratio",
 )
 

@@ -72,8 +72,19 @@ class IsthmusDetectionConfig:
     MIN_AXIS_SECTIONS: int = 4
     """拟合椎弓根轴所需的最少截面数；不足时沿用钉轴方向。"""
 
-    MAX_AXIS_ANGLE_DEG: float = 30.0
-    """椎弓根轴与钉轴夹角的上限；回归结果超过该值视为不可靠，沿用钉轴方向。"""
+    AXIS_CORE_WIDTH_FACTOR: float = 1.2
+    """
+    只用横径不超过峡部横径该倍数的截面拟合椎弓根轴（峡部核心段）；不足
+    MIN_AXIS_SECTIONS 时放宽到整个椎弓根段。椎弓根两端呈漏斗形张开，
+    张开段的截面中点会把轴线拉偏。
+    """
+
+    MAX_AXIS_ANGLE_DEG: float = 20.0
+    """
+    椎弓根轴与钉轴夹角的上限；回归结果超过该值视为不可靠，沿用钉轴方向
+    （angle_deg 报 NaN）。经验规划的螺钉与椎弓根轴相差超过 20° 少见，而首例
+    临床数据中漏斗形张开造成的假倾角为 28–34°。
+    """
 
     def validate(self) -> None:
         for name in ("AXIAL_STEP", "RAY_ANGLE_STEP_DEG", "RAY_STEP_MM", "MAX_RAY_MM", "EXIT_RUN_MM",
@@ -85,6 +96,8 @@ class IsthmusDetectionConfig:
         lo, hi = self.SEARCH_RANGE
         if not 0.0 <= lo < hi <= 1.0:
             raise ValueError(f"SEARCH_RANGE ({self.SEARCH_RANGE}) must satisfy 0 <= lo < hi <= 1")
+        if not 1.0 <= self.AXIS_CORE_WIDTH_FACTOR <= self.PEDICLE_WIDTH_FACTOR:
+            raise ValueError("AXIS_CORE_WIDTH_FACTOR must be within [1, PEDICLE_WIDTH_FACTOR]")
         if not self.PEDICLE_WIDTH_FACTOR >= 1.0:
             raise ValueError(f"PEDICLE_WIDTH_FACTOR ({self.PEDICLE_WIDTH_FACTOR}) must be >= 1")
         if self.MIN_CORTEX_CONTRAST_HU < 0:
@@ -244,7 +257,8 @@ class PedicleGeometry:
     椎弓根几何
 
     isthmus 为峡部射线截面；axis 为拟合的椎弓根轴线方向（与基准螺钉同向），
-    axis_status / axis_fit_tilt_deg 说明拟合是否被采用（见 _fit_axis）；
+    axis_status / axis_fit_tilt_deg 说明拟合是否被采用（见 _fit_axis）；未采用时
+    axis 为钉轴方向，trajectory_match 的 angle_deg 为 NaN（而不是 0）；
     section_normal 为椎弓根段起止平面的法向（基准钉轴方向），start_point/end_point
     为起止平面上的点；profile 为各截面的诊断字典（t、横径、高度、四个方向的
     外壁距离、是否属于椎弓根段，未闭合为 inf）。
@@ -343,7 +357,7 @@ class PedicleGeometry:
         """
         轨迹匹配度特征
 
-        angle_deg: 螺钉轴与椎弓根轴夹角；isthmus_offset_mm: 峡部平面内螺钉轴与峡部
+        angle_deg: 螺钉轴与椎弓根轴夹角（椎弓根轴未拟合成功时为 NaN）；isthmus_offset_mm: 峡部平面内螺钉轴与峡部
         中心的距离；outer/inner_clearance_mm: 峡部处螺钉表面到外壁/内壁（皮质内缘）
         的最小距离（负值表示越出）；medial/lateral_clearance_mm: 到内侧壁/外侧壁的
         距离；diameter_ratio: 螺钉直径与峡部内径之比。
@@ -353,7 +367,7 @@ class PedicleGeometry:
         crossing = self.isthmus_crossing(plan)
         clear = self._clearances(plan)
         return {
-            "angle_deg": float(np.degrees(np.arccos(cos_angle))),
+            "angle_deg": float(np.degrees(np.arccos(cos_angle))) if self.axis_status == "fitted" else float("nan"),
             "isthmus_offset_mm": float(np.linalg.norm(crossing - self.isthmus_point)),
             "outer_clearance_mm": clear["outer"],
             "inner_clearance_mm": clear["inner"],
@@ -468,7 +482,11 @@ def detect_pedicle_isthmus(bone_mask: sitk.Image, plan: ScrewPlan, image: sitk.I
     while hi + 1 < len(sections) and widths[hi + 1] <= limit:
         hi += 1
 
-    axis, axis_status, axis_tilt = _fit_axis(sections[lo:hi + 1], direction, config.MIN_AXIS_SECTIONS,
+    core = [s for s, w in zip(sections[lo:hi + 1], widths[lo:hi + 1])
+            if w <= config.AXIS_CORE_WIDTH_FACTOR * widths[idx]]
+    if len(core) < config.MIN_AXIS_SECTIONS:
+        core = sections[lo:hi + 1]
+    axis, axis_status, axis_tilt = _fit_axis(core, direction, config.MIN_AXIS_SECTIONS,
                                              config.MAX_AXIS_ANGLE_DEG)
     half_step = 0.5 * config.AXIAL_STEP
     start_point = entry + (t_values[lo] - half_step) * direction

@@ -25,6 +25,7 @@ if HAS_IMAGING_DEPS:
         optimize_screw_plan,
         resolve_pivot_point,
         snap_entry_to_surface,
+        trajectory_angles,
     )
     from pedicle_planning.ai.pedicle import IsthmusDetectionConfig, detect_pedicle_isthmus
     from pedicle_planning.ai.trajectory import ScrewPlan
@@ -125,6 +126,16 @@ class CandidateGenerationTests(unittest.TestCase):
         d = np.asarray(shifted.direction)
         self.assertLess(np.linalg.norm(to_shifted_pivot - np.dot(to_shifted_pivot, d) * d), 1e-9)
 
+    def test_trajectory_angles_in_anatomical_frame(self):
+        self.assertEqual(trajectory_angles(self.baseline, self.frame),
+                         {"medial_angle_deg": 0.0, "cranial_angle_deg": 0.0})
+        tilted = adjust_plan(self.baseline, self.frame, medial_angle_deg=12.0, cranial_angle_deg=-4.0)
+        angles = trajectory_angles(tilted, self.frame)
+        self.assertAlmostEqual(angles["medial_angle_deg"], 12.0, places=6)
+        self.assertAlmostEqual(angles["cranial_angle_deg"], -4.0, places=6)
+        mirrored = AnatomicalFrame(medial=(0.0, -1.0, 0.0), cranial=(0.0, 0.0, 1.0))
+        self.assertAlmostEqual(trajectory_angles(tilted, mirrored)["medial_angle_deg"], -12.0, places=6)
+
     def test_isthmus_pivot_requires_pivot_source(self):
         self.assertIsNone(resolve_pivot_point(self.baseline, "entry"))
         with self.assertRaises(ValueError):
@@ -190,6 +201,14 @@ class PedicleAndOptimizationTests(unittest.TestCase):
         self.assertLess(aligned_match["angle_deg"], 0.5)
         self.assertLess(aligned_match["isthmus_offset_mm"], 0.3)
         self.assertGreater(aligned_match["outer_clearance_mm"], 1.0)
+
+    def test_rejected_axis_reports_nan_angle(self):
+        strict = detect_pedicle_isthmus(self.mask, self.baseline, image=self.ct, frame=self.frame,
+                                        config=IsthmusDetectionConfig(MAX_AXIS_ANGLE_DEG=2.0))
+        self.assertEqual(strict.axis_status, "tilt_above_limit")
+        self.assertGreater(strict.axis_fit_tilt_deg, 2.0)
+        self.assertTrue(math.isnan(strict.trajectory_match(self.baseline)["angle_deg"]))
+        np.testing.assert_allclose(strict.axis, self.baseline.direction, atol=1e-12)
 
     def test_wall_clearance_detects_breach(self):
         shifted = adjust_plan(self.baseline, self.frame, medial_offset_mm=3.0)

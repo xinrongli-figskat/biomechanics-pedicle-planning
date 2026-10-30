@@ -451,12 +451,34 @@ def entry_displacement(baseline: ScrewPlan, plan: ScrewPlan, frame: AnatomicalFr
     return result
 
 
+def trajectory_angles(plan: ScrewPlan, frame: AnatomicalFrame) -> dict:
+    """
+    螺钉相对椎体解剖方向的角度（度）
+
+    medial_angle_deg: 横断面内相对前后轴的内倾角（向中线为正）；
+    cranial_angle_deg: 矢状面内相对前后轴的头倾角（向头侧为正）。
+    前后轴取垂直于内侧、头侧方向且与螺钉同向的方向。
+    """
+    direction = np.asarray(plan.direction, dtype=np.float64)
+    medial = np.asarray(frame.medial, dtype=np.float64)
+    cranial = np.asarray(frame.cranial, dtype=np.float64)
+    anterior = np.cross(cranial, medial)
+    if np.dot(anterior, direction) < 0:
+        anterior = -anterior
+    a, m, c = float(direction @ anterior), float(direction @ medial), float(direction @ cranial)
+    return {
+        "medial_angle_deg": float(np.degrees(np.arctan2(m, a))),
+        "cranial_angle_deg": float(np.degrees(np.arctan2(c, np.hypot(a, m)))),
+    }
+
+
 def candidate_features(image, candidate: Candidate, ctx: ConstraintContext,
                        calibration=None, sampling_config: TrajectorySamplingConfig = None) -> dict:
     """
     计算候选方案的风险模型输入特征
 
-    钉道骨密度特征（ctx.frame 存在时含内外侧/头尾侧半环）+ 可用时的 match_* 轨迹匹配特征。
+    钉道骨密度特征（ctx.frame 存在时含内外侧/头尾侧半环与 traj_* 螺钉角度）
+    + 可用时的 match_* 轨迹匹配特征。
     """
     bounds = ctx.pedicle.segment_bounds_for(candidate.plan) if ctx.pedicle is not None else None
     features = compute_trajectory_features(
@@ -464,6 +486,9 @@ def candidate_features(image, candidate: Candidate, ctx: ConstraintContext,
         calibration=calibration, config=sampling_config, segment_bounds_mm=bounds,
         frame=ctx.frame,
     ).to_flat_dict()
+    if ctx.frame is not None:
+        for key, value in trajectory_angles(candidate.plan, ctx.frame).items():
+            features[f"traj_{key}"] = value
     if ctx.pedicle is not None:
         for key, value in ctx.pedicle.trajectory_match(candidate.plan).items():
             features[f"match_{key}"] = value

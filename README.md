@@ -21,7 +21,7 @@ mesh transition algorithms, and Abaqus C3D4 export.
 - Automatic per-vertebra anatomical frame from a vertebra mask
 - Directional (medial/lateral, cranial/caudal) interface features and whole vertebral-body BMD
 - Tetrahedral transition and Abaqus export utilities
-- 92 synthetic tests with GitHub Actions CI
+- 94 synthetic tests with GitHub Actions CI
 - No real patient data or patient-derived geometry
 ## Overview
 
@@ -86,7 +86,7 @@ The repository exposes the individual computational components above. It is not 
 
 ## Testing
 
-The current test suite contains 92 synthetic tests. They cover:
+The current test suite contains 94 synthetic tests. They cover:
 
 - HU preprocessing
 - Coordinate conversion and round trips
