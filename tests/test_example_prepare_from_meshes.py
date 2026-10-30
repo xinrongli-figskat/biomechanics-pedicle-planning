@@ -29,6 +29,11 @@ def _load_script():
     return module
 
 
+def _component_count(mask_array):
+    return int(sitk.GetArrayFromImage(sitk.ConnectedComponent(
+        sitk.GetImageFromArray(mask_array.astype(np.uint8)))).max())
+
+
 def _surface(mask_array, spacing=1.0):
     """Closed surface of a (z, y, x) mask with identity direction and zero origin."""
     padded = np.pad(mask_array.astype(np.float32), 1)
@@ -89,7 +94,7 @@ class PrepareFromMeshesTests(unittest.TestCase):
         array = sitk.GetArrayViewFromImage(labels)
         _, mask, _ = synthetic_vertebra_ct(15.0, 0.0, 0.0)
         reference = sitk.GetArrayViewFromImage(mask) > 0
-        vertebra = array == 1  # largest component is the vertebra
+        vertebra = array == 2  # labels run cranial to caudal; the extra block sits above the vertebra
         dice = 2 * np.count_nonzero(vertebra & reference) / (np.count_nonzero(vertebra) + np.count_nonzero(reference))
         self.assertGreater(dice, 0.95)
 
@@ -98,7 +103,7 @@ class PrepareFromMeshesTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         row = rows[0]
         self.assertEqual(row["screw_id"], "screw1")
-        self.assertEqual(row["label"], "1")
+        self.assertEqual(row["label"], "2")
         entry = np.array([float(row[f"entry_{c}"]) for c in "xyz"])
         tip = np.array([float(row[f"tip_{c}"]) for c in "xyz"])
         self.assertLess(np.linalg.norm(entry - self.entry), 1.0)
@@ -112,7 +117,52 @@ class PrepareFromMeshesTests(unittest.TestCase):
         report, rows, labels = self._run("bone_ras.stl", "out_ras")
         self.assertEqual(report["bone_meshes"][0]["coords"], "ras")
         self.assertEqual(len(report["labels"]), 2)
-        self.assertEqual(rows[0]["label"], "1")
+        self.assertEqual(rows[0]["label"], "2")
+
+    def test_screw_head_is_removed(self):
+        direction = (self.tip - self.entry) / np.linalg.norm(self.tip - self.entry)
+        head_end = self.entry - 12.0 * direction
+        shank = pv.Line(self.entry, self.tip, resolution=60).tube(radius=2.5, n_sides=32, capping=True)
+        head = pv.Line(head_end, self.entry, resolution=20).tube(radius=5.25, n_sides=32, capping=True)
+        (shank + head).triangulate().save(str(self.root / "screw_head.stl"))
+        argv = ["--ct", str(self.root / "ct.nii.gz"), "--bone-mesh", str(self.root / "bone_lps.stl"),
+                "--screw-mesh", str(self.root / "screw_head.stl"), "--out", str(self.root / "out_head")]
+        self.assertEqual(self.script.main(argv), 0)
+        with open(self.root / "out_head" / "prepare_report.json") as handle:
+            screw = json.load(handle)["screws"][0]
+        self.assertTrue(screw["head_found"])
+        self.assertAlmostEqual(screw["head_length_mm"], 12.0, delta=1.5)
+        self.assertAlmostEqual(screw["length_mm"], self.length, delta=1.5)
+        self.assertAlmostEqual(screw["diameter_mm"], 5.0, delta=0.3)
+        self.assertLess(np.linalg.norm(np.asarray(screw["entry"]) - self.entry), 1.5)
+        self.assertLess(np.linalg.norm(np.asarray(screw["tip"]) - self.tip), 1.5)
+
+    def test_touching_vertebrae_are_split_cranial_first(self):
+        _, mask, _ = synthetic_vertebra_ct(15.0, 0.0, 0.0)
+        lower = sitk.GetArrayFromImage(mask) > 0
+        upper = np.roll(lower, 32, axis=0)  # same vertebra 32 mm more cranial (z index = axis 0)
+        bridge = np.zeros_like(lower)
+        # 4 x 4 mm bony bridge from the lower body's top (z 72) to the upper body's bottom (z 80);
+        # the body centre of the 15-degree-rotated phantom lies at about x 57, y 48
+        bridge[70:82, 46:50, 55:59] = True
+        self.assertEqual(_component_count(lower | upper | bridge), 1)
+        fused = lower | upper | bridge
+        _surface(fused).save(str(self.root / "fused.stl"))
+        out = self.root / "out_fused"
+        argv = ["--ct", str(self.root / "ct.nii.gz"), "--bone-mesh", str(self.root / "fused.stl"),
+                "--vertebrae", "2", "--out", str(out)]
+        self.assertEqual(self.script.main(argv), 0)
+        with open(out / "prepare_report.json") as handle:
+            report = json.load(handle)
+        self.assertTrue(report["split_touching_vertebrae"])
+        self.assertEqual(len(report["labels"]), 2)
+        self.assertGreater(report["labels"]["1"]["centroid"][2], report["labels"]["2"]["centroid"][2])
+        labels = sitk.GetArrayFromImage(sitk.ReadImage(str(out / "vertebrae_from_mesh.nii.gz")))
+        for value, reference in ((1, upper), (2, lower)):
+            part = labels == value
+            dice = 2 * np.count_nonzero(part & reference) / (np.count_nonzero(part) + np.count_nonzero(reference))
+            self.assertGreater(dice, 0.9)
+        self.assertTrue(bridge.any())
 
     def test_outputs_do_not_contain_input_names(self):
         self._run("bone_lps.stl", "out_names")

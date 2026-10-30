@@ -34,8 +34,8 @@ python examples/clinical/prepare_from_meshes.py --ct cases/case01/ct.nii --bone-
 ```
 
 - Each mesh is matched to the CT in LPS or RAS automatically (`--mesh-coords` to force); meshes that overlap the CT in neither (unpositioned templates) are skipped.
-- Bone meshes are rasterized on the CT grid; separate vertebrae (e.g. L3 and L4 in one STL) become separate labels. Compare `rasterized_volume_ml` with `mesh_volume_ml`: a large gap means the mesh is not closed.
-- Each screw's axis, axial end points and outer diameter come from the mesh shape; the entry is the end with less bone around it, and the label is the vertebra the axis runs through. A screw model that includes a head or tulip makes the length too long; check `length_mm`.
+- Bone meshes are rasterized on the CT grid; separate vertebrae (e.g. L3 and L4 in one STL) become separate labels, numbered cranial to caudal (1 = most cranial). Compare `rasterized_volume_ml` with `mesh_volume_ml`: a large gap means the mesh is not closed. A single lumbar vertebra is roughly 50–90 ml; if two vertebrae come out as one label because the surfaces touch, pass `--vertebrae 2` to split them (erosion + watershed).
+- Each screw's axis comes from the mesh shape. The radius profile along the axis identifies a wider end segment (screw head / tulip), which is excluded: `length_mm` and `diameter_mm` describe the threaded shank and the entry is the shank end next to the head. Without a head, the entry is the end with less bone around it. The label is the vertebra the axis runs through.
 - Outputs (`vertebrae_from_mesh.nii.gz`, `screws_from_mesh.csv` with a `label` column, `prepare_report.json`) use neutral names (`screw1`, `label 1`), never input file names. Pass them to `run_case_pipeline.py` with `--mask` and `--screws` (LPS, the default).
 
 ## Inputs
