@@ -25,6 +25,19 @@ python examples/clinical/inspect_inputs.py --ct cases/case01/ct.nii --mask cases
 
 This prints size, spacing, orientation, intensity percentiles and mask labels, and warns when the CT does not look like HU (e.g. a converter dropped the DICOM rescale intercept), when slices are thick, or when the mask is not in the same space as the CT. Copy cases to a short path without spaces or non-ASCII characters (e.g. `D:\cases\case01\`), which avoids path problems in SimpleITK and TotalSegmentator on Windows.
 
+## Starting from planning-system meshes
+
+If a planning system stored the segmented bone as a surface mesh (e.g. STL) and the planned screws as positioned screw models, convert them first:
+
+```bash
+python examples/clinical/prepare_from_meshes.py --ct cases/case01/ct.nii --bone-mesh cases/case01/bone.stl --screw-mesh cases/case01/screw_a.stl --out cases/case01/prepared
+```
+
+- Each mesh is matched to the CT in LPS or RAS automatically (`--mesh-coords` to force); meshes that overlap the CT in neither (unpositioned templates) are skipped.
+- Bone meshes are rasterized on the CT grid; separate vertebrae (e.g. L3 and L4 in one STL) become separate labels. Compare `rasterized_volume_ml` with `mesh_volume_ml`: a large gap means the mesh is not closed.
+- Each screw's axis, axial end points and outer diameter come from the mesh shape; the entry is the end with less bone around it, and the label is the vertebra the axis runs through. A screw model that includes a head or tulip makes the length too long; check `length_mm`.
+- Outputs (`vertebrae_from_mesh.nii.gz`, `screws_from_mesh.csv` with a `label` column, `prepare_report.json`) use neutral names (`screw1`, `label 1`), never input file names. Pass them to `run_case_pipeline.py` with `--mask` and `--screws` (LPS, the default).
+
 ## Inputs
 
 | Argument | Content |
